@@ -1,0 +1,94 @@
+from __future__ import annotations
+
+import tempfile
+from pathlib import Path
+
+from openpyxl import load_workbook
+from pypdf import PdfReader
+
+from policy_transfer.exporters import export_bundle
+from policy_transfer.extractors import ExtractionInput, PrudentialExtractor
+from policy_transfer.models import FieldValue, Person, PolicyCase, ProductLine
+
+
+import os
+
+
+ROOT = Path(os.environ.get("POLICY_TRANSFER_SAMPLE_ROOT", "/Users/anthony/Documents/transfer"))
+A_FILES = [ROOT / "A" / "Document.pdf", ROOT / "A" / "Document-3.pdf"]
+
+
+def main() -> None:
+    if not all(path.exists() for path in A_FILES):
+        print("Sample A PDFs not found; set POLICY_TRANSFER_SAMPLE_ROOT to run sample-based tests.")
+        test_future_extractor_shape()
+        print("Portable tests passed.")
+        return
+    test_prudential_extract()
+    test_export_bundle()
+    test_future_extractor_shape()
+    print("All tests passed.")
+
+
+def _inputs() -> list[ExtractionInput]:
+    return [ExtractionInput(path.name, path.read_bytes()) for path in A_FILES]
+
+
+def test_prudential_extract() -> None:
+    case = PrudentialExtractor().extract(_inputs())
+    assert case.proposal_no.value == "000014260829", case.proposal_no
+    assert case.proposer.english_family_name.value == "ZENG"
+    assert case.proposer.english_given_name.value == "DONGLING"
+    assert case.proposer.id_number.value == "440821197001240049"
+    assert case.insured.english_family_name.value == "OU"
+    assert case.insured.english_given_name.value == "MINGHAO"
+    assert case.insured.id_number.value == "Q440627592"
+    assert case.currency.value == "USD"
+    assert case.payment_mode.value == "ANNUALLY"
+    assert float(case.total_modal_premium.value) == 595.81
+    assert case.products, "products should be extracted"
+
+
+def test_export_bundle() -> None:
+    case = PrudentialExtractor().extract(_inputs())
+    with tempfile.TemporaryDirectory() as tmp:
+        files = export_bundle(case, Path(tmp))
+        for path in files.values():
+            assert path.exists(), path
+            assert path.stat().st_size > 0, path
+        PdfReader(str(files["client_acknowledgement"]))
+        PdfReader(str(files["risk_assessment"]))
+        PdfReader(str(files["client_booklet"]))
+        wb = load_workbook(files["policy_import"], data_only=True)
+        assert "policy" in wb.sheetnames
+        assert wb["policy"]["C2"].value == "000014260829"
+
+
+def test_future_extractor_shape() -> None:
+    class MockExtractor:
+        company_key = "mock"
+        display_name = "Mock Insurer"
+
+        def matches(self, files):
+            return True
+
+        def extract(self, files):
+            case = PolicyCase()
+            case.source_company = FieldValue("MOCK", 1)
+            case.proposal_no = FieldValue("MOCK-1", 1)
+            case.policy_no = FieldValue("MOCK-1", 1)
+            case.currency = FieldValue("USD", 1)
+            case.payment_mode = FieldValue("ANNUALLY", 1)
+            case.total_modal_premium = FieldValue(1000, 1)
+            case.proposer = Person(role="proposer", english_family_name=FieldValue("CHAN", 1), english_given_name=FieldValue("TAI MAN", 1), id_number=FieldValue("A1234567", 1), date_of_birth=FieldValue("1980-01-01", 1), sex=FieldValue("MALE", 1), nationality=FieldValue("China", 1))
+            case.insured = Person(role="insured", english_family_name=FieldValue("CHAN", 1), english_given_name=FieldValue("TAI MAN", 1), id_number=FieldValue("A1234567", 1), date_of_birth=FieldValue("1980-01-01", 1), sex=FieldValue("MALE", 1), nationality=FieldValue("China", 1), residential_address=FieldValue("Hong Kong", 1))
+            case.products = [ProductLine("basic", name=FieldValue("Mock Product", 1), code=FieldValue("MOCK:P1", 1), premium_term=FieldValue(10, 1), sum_assured=FieldValue(100000, 1), modal_premium=FieldValue(1000, 1))]
+            return case
+
+    case = MockExtractor().extract([])
+    assert case.products[0].name.value == "Mock Product"
+    assert case.proposer.id_number.value == "A1234567"
+
+
+if __name__ == "__main__":
+    main()

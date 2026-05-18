@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from policy_transfer.config import B_ACK, B_CLIENT_BOOKLET, B_RISK, B_SERVICE_DOCX, DEFAULT_C_TEMPLATE
@@ -12,13 +13,17 @@ from policy_transfer.models import PolicyCase
 
 def export_bundle(case: PolicyCase, output_dir: Path) -> dict[str, Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
+    for existing in output_dir.iterdir():
+        if existing.is_file():
+            existing.unlink()
+    prefix = _filename_prefix(case)
     files = {
-        "client_booklet": output_dir / "client-booklet.pdf",
-        "client_acknowledgement": output_dir / "client-acknowledgement.pdf",
-        "risk_assessment": output_dir / "risk-assessment.pdf",
-        "service_appointment": output_dir / "service-appointment.docx",
-        "policy_import": output_dir / "policy-import.xlsx",
-        "report": output_dir / "conversion-report.json",
+        "client_booklet": output_dir / f"{prefix}_client_booklet.pdf",
+        "client_acknowledgement": output_dir / f"{prefix}_ack.pdf",
+        "risk_assessment": output_dir / f"{prefix}_risk.pdf",
+        "service_appointment": output_dir / f"{prefix}_appointment.docx",
+        "policy_import": output_dir / f"{prefix}_policy_import.xlsx",
+        "report": output_dir / f"{prefix}_report.json",
     }
 
     fill_pdf_form(B_ACK, files["client_acknowledgement"], _ack_values(case))
@@ -36,6 +41,21 @@ def export_bundle(case: PolicyCase, output_dir: Path) -> dict[str, Path]:
     return files
 
 
+def _filename_prefix(case: PolicyCase) -> str:
+    holder = case.proposer.chinese_name.value or _english_name(case) or "Holder"
+    policy_no = case.policy_no.value or case.proposal_no.value or "No"
+    parts = ["transfer", holder, policy_no]
+    return "_".join(_safe_filename_part(part) for part in parts if _safe_filename_part(part))
+
+
+def _safe_filename_part(value: object) -> str:
+    text = str(value or "").strip()
+    text = re.sub(r"[\\/:*?\"<>|]+", "", text)
+    text = re.sub(r"\s+", "", text)
+    text = re.sub(r"_+", "_", text)
+    return text[:80] or ""
+
+
 def _english_name(case: PolicyCase) -> str:
     return " ".join(part for part in [case.proposer.english_family_name.value, case.proposer.english_given_name.value] if part).strip()
 
@@ -48,7 +68,7 @@ def _ack_values(case: PolicyCase) -> dict[str, object]:
         "ID/ Passport No": case.proposer.id_number.value,
         "Date": _display_date(case.sign_date.value),
         "Video Date": _display_date(case.virtual_meeting_date.value or case.sign_date.value),
-        "Name and Licensed No": f"{case.tr_name.value or 'NG KA HO'} ({case.tr_license_no.value or 'IA8673'})",
+        "Name and Licensed No": _tr_name_license(case),
     }
 
 
@@ -57,7 +77,7 @@ def _risk_values(case: PolicyCase) -> dict[str, object]:
         "Client": _english_name(case),
         "Nationality": _risk_nationality(case.proposer.nationality.value),
         "Product/Service": _risk_product_service(case),
-        "Text4": case.tr_name.value or "NG KA HO",
+        "Text4": case.tr_name.value,
     }
 
 

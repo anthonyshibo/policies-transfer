@@ -14,6 +14,7 @@ from policy_transfer.models import FieldValue, PolicyCase, flatten_case
 
 
 PREVIEW_DIR = DATA_DIR / "previews"
+PREVIEW_CACHE_VERSION = "v2"
 
 
 def crop_for_field(case: PolicyCase, field_path: str, pdf_path: Path, case_id: str) -> Path | None:
@@ -22,7 +23,9 @@ def crop_for_field(case: PolicyCase, field_path: str, pdf_path: Path, case_id: s
         return None
     page_number = field.source.page
     snippet = field.source.snippet or str(field.value or "")
-    cache_key = hashlib.sha1(f"{pdf_path}:{pdf_path.stat().st_mtime}:{page_number}:{field_path}:{snippet}".encode()).hexdigest()[:16]
+    if field_path == "source_company":
+        snippet = f"{snippet}\n保單內容\n保單號碼\n保誠保險有限公司"
+    cache_key = hashlib.sha1(f"{PREVIEW_CACHE_VERSION}:{pdf_path}:{pdf_path.stat().st_mtime}:{page_number}:{field_path}:{snippet}".encode()).hexdigest()[:16]
     out_dir = PREVIEW_DIR / case_id
     out_dir.mkdir(parents=True, exist_ok=True)
     output = out_dir / f"{cache_key}.png"
@@ -31,7 +34,7 @@ def crop_for_field(case: PolicyCase, field_path: str, pdf_path: Path, case_id: s
 
     page_image = _render_page(pdf_path, page_number, out_dir, cache_key)
     if not page_image:
-        return None
+        return _placeholder_preview(out_dir, cache_key)
     region = _find_region(pdf_path, page_number, snippet, str(field.value or ""))
 
     with Image.open(page_image) as image:
@@ -56,6 +59,15 @@ def crop_for_field(case: PolicyCase, field_path: str, pdf_path: Path, case_id: s
             # Fallback: upper-middle full-width slice is more readable than a full page thumbnail.
             crop = image.crop((0, 0, image.width, min(image.height, int(image.height * 0.45))))
         crop.save(output)
+    return output
+
+
+def _placeholder_preview(out_dir: Path, cache_key: str) -> Path:
+    output = out_dir / f"{cache_key}-placeholder.png"
+    if output.exists():
+        return output
+    image = Image.new("RGB", (900, 520), "#f8fafc")
+    image.save(output)
     return output
 
 

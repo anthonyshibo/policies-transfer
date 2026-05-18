@@ -69,6 +69,99 @@ VISIBLE_FIELDS = [
     "financial.payment_affordability",
 ]
 
+FIELD_SECTIONS: list[tuple[str, str, list[str]]] = [
+    (
+        "保单资料",
+        "Policy",
+        [
+            "source_company",
+            "proposal_no",
+            "billing_no",
+            "policy_no",
+            "policy_status",
+            "sign_date",
+            "submission_date",
+            "issue_date",
+            "policy_date",
+            "first_premium_date",
+            "next_premium_date",
+            "commission_date",
+            "cooling_off_end_date",
+            "currency",
+            "payment_mode",
+            "payment_method",
+            "total_modal_premium",
+        ],
+    ),
+    (
+        "投保人资料",
+        "Proposer",
+        [
+            "relationship",
+            "proposer.english_family_name",
+            "proposer.english_given_name",
+            "proposer.chinese_name",
+            "proposer.date_of_birth",
+            "proposer.sex",
+            "proposer.nationality",
+            "proposer.id_type",
+            "proposer.id_number",
+            "proposer.travel_permit_number",
+            "proposer.phone_country_code",
+            "proposer.phone",
+            "proposer.email",
+            "proposer.residential_address",
+            "proposer.correspondence_address",
+            "proposer.employer",
+            "proposer.business_nature",
+            "proposer.occupation",
+            "proposer.business_address",
+        ],
+    ),
+    (
+        "受保人资料",
+        "Insured",
+        [
+            "insured.english_family_name",
+            "insured.english_given_name",
+            "insured.chinese_name",
+            "insured.date_of_birth",
+            "insured.sex",
+            "insured.nationality",
+            "insured.id_type",
+            "insured.id_number",
+            "insured.residential_address",
+        ],
+    ),
+    (
+        "财务及需要分析",
+        "Financial / FNA",
+        [
+            "financial.monthly_income",
+            "financial.monthly_unearned_income",
+            "financial.monthly_expenses",
+            "financial.liquid_assets",
+            "financial.fixed_assets",
+            "financial.liabilities",
+            "financial.net_worth",
+            "financial.objectives",
+            "financial.protection_period",
+            "financial.payment_affordability",
+        ],
+    ),
+    (
+        "业务代表及合规",
+        "TR / Compliance",
+        [
+            "broker_company",
+            "tr_name",
+            "tr_code",
+            "tr_license_no",
+            "virtual_meeting_date",
+        ],
+    ),
+]
+
 FIELD_LABELS: dict[str, tuple[str, str, str]] = {
     "source_company": ("来源保险公司", "Source company", "用于选择解析规则，并写入 C 导入表的保险公司信息。"),
     "proposal_no": ("申请书/保单号码", "Proposal / policy number", "用于 B 文件、C 导入表的保单号码。"),
@@ -169,6 +262,40 @@ def review_rows(case: PolicyCase) -> list[tuple[str, FieldValue]]:
             if name in flat:
                 rows.append((name, flat[name]))
     return rows
+
+
+def review_sections(case: PolicyCase) -> list[tuple[str, str, list[tuple[str, FieldValue]]]]:
+    flat = flatten_case(case)
+    sections: list[tuple[str, str, list[tuple[str, FieldValue]]]] = []
+    used: set[str] = set()
+    for zh, en, fields in FIELD_SECTIONS:
+        rows = [(name, flat[name]) for name in fields if name in flat]
+        used.update(name for name, _field in rows)
+        sections.append((zh, en, rows))
+
+    product_rows: list[tuple[str, FieldValue]] = []
+    for idx, _product in enumerate(case.products):
+        prefix = f"products.{idx}"
+        for field in [
+            "kind",
+            "name",
+            "code",
+            "premium_term",
+            "benefit_term",
+            "sum_assured",
+            "modal_premium",
+            "ward_level",
+            "medical_region",
+            "deductible",
+            "rider_benefit",
+        ]:
+            name = f"{prefix}.{field}"
+            if name in flat:
+                product_rows.append((name, flat[name]))
+                used.add(name)
+    sections.append(("产品资料", "Products", product_rows))
+
+    return sections
 
 
 def field_label(path: str) -> str:

@@ -15,8 +15,8 @@ def export_service_appointment(template: Path, output: Path, case: PolicyCase) -
     proposer_en = _english_name(case)
     proposer_id = case.proposer.id_number.value
     policy_no = case.policy_no.value or case.proposal_no.value
-    tr_name = case.tr_name.value or "NG KA HO"
-    tr_license = case.tr_license_no.value or "IA8673"
+    tr_name = case.tr_name.value
+    tr_license = case.tr_license_no.value
 
     for paragraph in doc.paragraphs:
         text = paragraph.text
@@ -48,4 +48,3 @@ def _chinese_date(value: str) -> str:
     if len(parts) == 3:
         return f"{parts[0]}年{int(parts[1])}月{int(parts[2])}日"
     return value
-

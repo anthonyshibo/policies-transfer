@@ -100,7 +100,7 @@ class PolicyCase:
     broker_code: FieldValue = field(default_factory=FieldValue)
     tr_name: FieldValue = field(default_factory=FieldValue)
     tr_code: FieldValue = field(default_factory=FieldValue)
-    tr_license_no: FieldValue = field(default_factory=lambda: FieldValue("IA8673", 0.5, None, False, True, "Default from B template; please confirm."))
+    tr_license_no: FieldValue = field(default_factory=FieldValue)
     virtual_meeting_date: FieldValue = field(default_factory=FieldValue)
     proposer: Person = field(default_factory=lambda: Person(role="proposer"))
     insured: Person = field(default_factory=lambda: Person(role="insured"))

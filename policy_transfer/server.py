@@ -4,7 +4,11 @@ import cgi
 import html
 import os
 import mimetypes
+import platform
+import re
+import subprocess
 import sys
+import zipfile
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -14,7 +18,7 @@ from policy_transfer.case_store import create_case, load_case, output_dir, save_
 from policy_transfer.config import DEFAULT_TRANSFER_DIR
 from policy_transfer.exporters import export_bundle
 from policy_transfer.extractors import ExtractionInput, detect_extractor
-from policy_transfer.review import apply_updates, field_label, field_usage, review_rows, translated_issue
+from policy_transfer.review import apply_updates, field_label, field_usage, review_sections, translated_issue
 from policy_transfer.source_preview import crop_for_field
 
 
@@ -30,11 +34,15 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if parsed.path == "/":
                 self._html(_layout(_home()))
+            elif parsed.path.startswith("/open-file/"):
+                self._open_file(parsed.path)
             elif parsed.path.startswith("/review/"):
                 case_id = parsed.path.split("/")[-1]
                 self._html(_layout(_review(case_id, load_case(case_id))))
             elif parsed.path.startswith("/download/"):
                 self._download(parsed.path)
+            elif parsed.path.startswith("/download-all/"):
+                self._download_all(parsed.path)
             elif parsed.path.startswith("/source/"):
                 self._source_pdf(parsed.path)
             elif parsed.path.startswith("/source-crop/"):
@@ -68,9 +76,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle_extract(self) -> None:
         form = cgi.FieldStorage(fp=self.rfile, headers=self.headers, environ={"REQUEST_METHOD": "POST"})
-        upload_fields = form["files"] if "files" in form else []
-        if not isinstance(upload_fields, list):
-            upload_fields = [upload_fields]
+        upload_fields = []
+        for field_name in ("policy_files", "financial_files", "files"):
+            if field_name not in form:
+                continue
+            field_items = form[field_name]
+            if not isinstance(field_items, list):
+                field_items = [field_items]
+            upload_fields.extend(field_items)
         files: list[ExtractionInput] = []
         for item in upload_fields:
             if not item.filename:
@@ -100,7 +113,54 @@ class Handler(BaseHTTPRequestHandler):
         mime = mimetypes.guess_type(str(target))[0] or "application/octet-stream"
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", mime)
-        self.send_header("Content-Disposition", f'attachment; filename="{target.name}"')
+        self.send_header("Content-Disposition", _content_disposition(target.name, attachment=True))
+        self.send_header("Content-Length", str(target.stat().st_size))
+        self.end_headers()
+        with target.open("rb") as handle:
+            self.wfile.write(handle.read())
+
+    def _download_all(self, path: str) -> None:
+        parts = [unquote(part) for part in path.split("/") if part]
+        if len(parts) != 2:
+            self.send_error(HTTPStatus.NOT_FOUND)
+            return
+        _, case_id = parts
+        base = output_dir(case_id).resolve()
+        files = [path for path in base.iterdir() if path.is_file() and path.suffix.lower() != ".zip"]
+        if not files:
+            self.send_error(HTTPStatus.NOT_FOUND)
+            return
+        zip_name = _zip_name(files)
+        zip_path = base / zip_name
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as archive:
+            for item in files:
+                archive.write(item, item.name)
+        self._send_file(zip_path, attachment=True)
+
+    def _open_file(self, path: str) -> None:
+        parts = [unquote(part) for part in path.split("/") if part]
+        if len(parts) != 3:
+            self.send_error(HTTPStatus.NOT_FOUND)
+            return
+        _, case_id, filename = parts
+        target = _resolve_output_file(case_id, filename)
+        if not target:
+            self.send_error(HTTPStatus.NOT_FOUND)
+            return
+        _open_local_file(target)
+        encoded = b"OK"
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(encoded)))
+        self.end_headers()
+        self.wfile.write(encoded)
+
+    def _send_file(self, target: Path, attachment: bool) -> None:
+        mime = mimetypes.guess_type(str(target))[0] or "application/octet-stream"
+        disposition = "attachment" if attachment else "inline"
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", mime)
+        self.send_header("Content-Disposition", _content_disposition(target.name, attachment=attachment))
         self.send_header("Content-Length", str(target.stat().st_size))
         self.end_headers()
         with target.open("rb") as handle:
@@ -192,6 +252,24 @@ def _layout(content: str) -> str:
     button, .button {{ border: 0; background: var(--accent); color: #fff; border-radius: 7px; padding: 10px 14px; font-weight: 700; cursor: pointer; text-decoration: none; display: inline-block; }}
     button.secondary, .button.secondary {{ background: #344054; }}
     input[type=file] {{ display: block; width: 100%; padding: 16px; border: 1px dashed var(--line); border-radius: 8px; background: #fbfcff; }}
+    .home-panel {{ overflow: hidden; padding: 0; }}
+    .home-hero {{ padding: 30px 28px; border-bottom: 1px solid var(--line); background: linear-gradient(135deg, #f0fdfa 0%, #ffffff 54%, #eef4ff 100%); }}
+    .home-title {{ display: flex; align-items: center; gap: 14px; margin-bottom: 8px; }}
+    .home-mark {{ width: 42px; height: 42px; display: grid; place-items: center; border-radius: 8px; background: #0f766e; color: #fff; font-weight: 900; font-size: 20px; box-shadow: 0 10px 24px rgba(15, 118, 110, .20); }}
+    .home-title h1 {{ margin: 0; }}
+    .home-hero p {{ margin: 0; max-width: 760px; }}
+    .home-content {{ padding: 24px 28px 28px; }}
+    .home-actions {{ justify-content: flex-end; margin-top: 20px; }}
+    .upload-grid {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 18px; }}
+    .upload-box {{ border: 1px solid var(--line); border-radius: 8px; padding: 18px; background: #fff; box-shadow: 0 8px 18px rgba(15, 23, 42, .04); transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease; }}
+    .upload-box:hover {{ transform: translateY(-3px); border-color: #99d5ce; box-shadow: 0 16px 34px rgba(15, 23, 42, .10); }}
+    .upload-box h2 {{ margin: 0 0 6px; font-size: 16px; }}
+    .upload-box p {{ margin: 0 0 12px; font-size: 13px; }}
+    .home-note {{ margin-top: 20px; padding: 14px 16px; border: 1px solid #dbe7f3; border-radius: 8px; background: #f8fbff; color: var(--muted); font-size: 13px; line-height: 1.55; }}
+    .section-title {{ display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 26px 0 10px; padding-bottom: 8px; border-bottom: 2px solid #c7d7fe; }}
+    .section-title h2 {{ margin: 0; font-size: 18px; }}
+    .section-title .en {{ color: var(--muted); font-weight: 600; font-size: 13px; }}
+    .section-title .count {{ color: var(--muted); font-size: 12px; }}
     table {{ width: 100%; border-collapse: collapse; background: #fff; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }}
     th, td {{ padding: 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; font-size: 13px; }}
     th {{ background: #f1f4f9; color: #344054; position: sticky; top: 0; z-index: 1; }}
@@ -213,10 +291,31 @@ def _layout(content: str) -> str:
     .source-snippet {{ margin-top: 8px; max-height: 96px; overflow: auto; color: #344054; font-size: 12px; white-space: pre-wrap; }}
     input.field {{ width: 100%; min-width: 180px; padding: 8px; border: 1px solid var(--line); border-radius: 6px; font-size: 13px; }}
     .issues {{ border-left: 4px solid var(--warn); padding: 10px 14px; background: #fffbeb; color: #7c2d12; }}
-    .downloads {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; padding: 0; list-style: none; }}
-    .downloads a {{ display: block; padding: 14px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); text-decoration: none; }}
+    .done-panel {{ overflow: hidden; padding: 0; }}
+    .done-hero {{ display: grid; grid-template-columns: 1fr auto; gap: 20px; align-items: center; padding: 28px; border-bottom: 1px solid var(--line); background: linear-gradient(135deg, #f0fdfa 0%, #ffffff 54%, #eef4ff 100%); }}
+    .done-title {{ display: flex; align-items: center; gap: 14px; margin-bottom: 8px; }}
+    .done-mark {{ width: 42px; height: 42px; display: grid; place-items: center; border-radius: 50%; background: #0f766e; color: #fff; font-size: 24px; font-weight: 800; box-shadow: 0 10px 24px rgba(15, 118, 110, .22); }}
+    .done-title h1 {{ margin: 0; }}
+    .done-hero p {{ margin: 0; max-width: 760px; }}
+    .done-actions {{ margin-top: 0; justify-content: flex-end; }}
+    .button.primary {{ background: #0f766e; box-shadow: 0 10px 22px rgba(15, 118, 110, .18); }}
+    .button.primary:hover {{ transform: translateY(-1px); box-shadow: 0 14px 28px rgba(15, 118, 110, .22); }}
+    .button, button {{ transition: transform .16s ease, box-shadow .16s ease, background .16s ease; }}
+    .done-content {{ padding: 24px 28px 28px; }}
+    .done-subhead {{ display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; }}
+    .done-subhead h2 {{ margin: 0; font-size: 16px; }}
+    .done-subhead span {{ color: var(--muted); font-size: 13px; }}
+    .downloads {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; padding: 0; margin: 0; list-style: none; }}
+    .download-card {{ display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; gap: 12px; align-items: center; min-height: 86px; padding: 14px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); text-decoration: none; box-shadow: 0 8px 18px rgba(15, 23, 42, .04); overflow: hidden; transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease, background .16s ease; }}
+    .download-card:hover {{ transform: translateY(-3px); border-color: #99d5ce; background: #fcfffe; box-shadow: 0 16px 34px rgba(15, 23, 42, .10); }}
+    .file-badge {{ width: 44px; height: 44px; display: grid; place-items: center; border-radius: 8px; background: #e6f4f1; color: #0f766e; font-weight: 800; font-size: 12px; }}
+    .download-card > span:nth-child(2) {{ min-width: 0; }}
+    .download-card strong {{ display: block; margin-bottom: 5px; font-size: 15px; }}
+    .download-card code {{ display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: transparent; padding: 0; color: var(--muted); font-size: 12px; }}
+    .open-hint {{ color: #0f766e; font-size: 13px; font-weight: 700; opacity: 0; transform: translateX(-4px); transition: opacity .16s ease, transform .16s ease; }}
+    .download-card:hover .open-hint {{ opacity: 1; transform: translateX(0); }}
     code {{ background: #edf2f7; padding: 2px 5px; border-radius: 4px; }}
-    @media (max-width: 760px) {{ main {{ padding: 16px; }} table {{ display:block; overflow:auto; }} header {{ padding: 0 16px; }} }}
+    @media (max-width: 760px) {{ main {{ padding: 16px; }} table {{ display:block; overflow:auto; }} header {{ padding: 0 16px; }} .upload-grid {{ grid-template-columns: 1fr; }} .done-hero {{ grid-template-columns: 1fr; }} .done-actions, .home-actions {{ justify-content: flex-start; }} }}
   </style>
 </head>
 <body>
@@ -224,6 +323,12 @@ def _layout(content: str) -> str:
   <main>{content}</main>
   <script>
     document.addEventListener('click', function (event) {{
+      const opener = event.target.closest('[data-open-file]');
+      if (opener) {{
+        fetch(opener.getAttribute('href')).catch(function () {{}});
+        event.preventDefault();
+        return;
+      }}
       const close = event.target.closest('.source-close');
       if (close) {{
         close.closest('.source-hover')?.classList.remove('pinned');
@@ -255,15 +360,29 @@ def _layout(content: str) -> str:
 
 
 def _home() -> str:
-    return """<section class="panel">
-  <h1>保单转单工具</h1>
-  <p>上传 A 公司 Prudential PDF，系统会抽取关键字段到统一模型。你确认后，可一次生成 B 公司文件和 C 系统 Excel。</p>
+    return """<section class="panel home-panel">
+  <div class="home-hero">
+    <div class="home-title"><span class="home-mark">PT</span><h1>保单转单工具</h1></div>
+    <p>上传 Prudential 保单文件与财务资料，系统会抽取关键字段；确认无误后，一次生成 B 公司文件和 C 系统导入表。</p>
+  </div>
+  <div class="home-content">
   <form method="post" action="/extract" enctype="multipart/form-data">
-    <input type="file" name="files" accept="application/pdf" multiple required>
-    <div class="actions"><button type="submit">上传并抽取</button></div>
+    <div class="upload-grid">
+      <div class="upload-box">
+        <h2>保单文件 / Policy document</h2>
+        <p>上传 ePolicy 或正式保单 PDF。用于读取保单号、生效日、首期保费日、产品及正式保费。</p>
+        <input type="file" name="policy_files" accept="application/pdf" multiple required>
+      </div>
+      <div class="upload-box">
+        <h2>财务资料 / Financial information</h2>
+        <p>上传 Financial Information / FNA PDF。用于读取收入、资产、负债、开支和保障目标。</p>
+        <input type="file" name="financial_files" accept="application/pdf" multiple>
+      </div>
+    </div>
+    <div class="actions home-actions"><button class="primary" type="submit">上传并抽取</button></div>
   </form>
-  <h2>第一版范围</h2>
-  <p>支持当前样本格式的 <code>Document.pdf</code> 和 <code>Document-3.pdf</code>。未来新增保险公司时，只需新增 extractor，不需要重写导出逻辑。</p>
+  <div class="home-note">第一版支持当前 Prudential 样本格式。未来新增保险公司时，只需新增 extractor，不需要重写导出逻辑。</div>
+  </div>
 </section>"""
 
 
@@ -273,8 +392,7 @@ def _review(case_id: str, case) -> str:
         items = "".join(f"<li>{html.escape(translated_issue(issue))}</li>" for issue in case.review_issues)
         issue_html = f"<div class='issues'><strong>需要确认</strong><ul>{items}</ul></div>"
 
-    rows = []
-    for path, field_value in review_rows(case):
+    def render_row(path, field_value) -> str:
         css = "missing" if field_value.required and not field_value.value else "review" if field_value.needs_review else ""
         source = ""
         if field_value.source:
@@ -293,7 +411,7 @@ def _review(case_id: str, case) -> str:
                 "</span>"
                 "</span>"
             )
-        rows.append(
+        return (
             "<tr class='{css}'>"
             "<td class='path'>{label}</td>"
             "<td><input class='field' name='field:{path}' value='{value}'></td>"
@@ -315,15 +433,28 @@ def _review(case_id: str, case) -> str:
                 source=source,
             )
         )
+
+    section_html = []
+    for zh, en, section_rows in review_sections(case):
+        if not section_rows:
+            continue
+        rows = "".join(render_row(path, field_value) for path, field_value in section_rows)
+        section_html.append(
+            "<div class='section-title'>"
+            f"<h2>{html.escape(zh)} <span class='en'>{html.escape(en)}</span></h2>"
+            f"<span class='count'>{len(section_rows)} fields</span>"
+            "</div>"
+            "<table>"
+            "<thead><tr><th>字段 / Field</th><th>值 / Value</th><th>用途说明</th><th>置信度</th><th>必填</th><th>备注</th><th>内部字段</th><th>来源</th></tr></thead>"
+            f"<tbody>{rows}</tbody>"
+            "</table>"
+        )
     return f"""<section class="panel">
   <h1>人工确认</h1>
   <p>低置信度和缺失字段会高亮。修改后先保存确认，再生成文件。</p>
   {issue_html}
   <form method="post" action="/review/{case_id}">
-    <table>
-      <thead><tr><th>字段 / Field</th><th>值 / Value</th><th>用途说明</th><th>置信度</th><th>必填</th><th>备注</th><th>内部字段</th><th>来源</th></tr></thead>
-      <tbody>{''.join(rows)}</tbody>
-    </table>
+    {''.join(section_html)}
     <div class="actions">
       <button type="submit">保存确认</button>
     </div>
@@ -339,12 +470,31 @@ def _review(case_id: str, case) -> str:
 def _exported(case_id: str, files: dict[str, Path]) -> str:
     links = []
     for label, path in files.items():
-        links.append(f"<li><a href='/download/{case_id}/{html.escape(path.name)}'>{html.escape(label)}<br><code>{html.escape(path.name)}</code></a></li>")
-    return f"""<section class="panel">
-  <h1>文件已生成</h1>
-  <p>输出文件已写入本地工作区，也可以从下面下载打开。</p>
-  <ul class="downloads">{''.join(links)}</ul>
-  <div class="actions"><a class="button secondary" href="/review/{case_id}">回到确认页</a></div>
+        links.append(
+            f"<li><a class='download-card' href='/open-file/{case_id}/{quote(path.name)}' title='打开文件' data-open-file='1'>"
+            f"<span class='file-badge'>{html.escape(_file_ext(path))}</span>"
+            "<span>"
+            f"<strong>{html.escape(_file_label(label))}</strong>"
+            f"<code>{html.escape(path.name)}</code>"
+            "</span>"
+            "<span class='open-hint'>打开</span>"
+            "</a></li>"
+        )
+    return f"""<section class="panel done-panel">
+  <div class="done-hero">
+    <div>
+      <div class="done-title"><span class="done-mark">✓</span><h1>文件已生成</h1></div>
+      <p>转换完成。单击文件会用本机默认应用打开；需要转发或备份时，一键下载全部 ZIP。</p>
+    </div>
+    <div class="actions done-actions">
+      <a class="button primary" href="/download-all/{case_id}">下载全部 ZIP</a>
+      <a class="button secondary" href="/review/{case_id}">回到确认页</a>
+    </div>
+  </div>
+  <div class="done-content">
+    <div class="done-subhead"><h2>输出文件</h2><span>{len(files)} 个文件</span></div>
+    <ul class="downloads">{''.join(links)}</ul>
+  </div>
 </section>"""
 
 
@@ -368,6 +518,61 @@ def _resolve_source_pdf(case_id: str, filename: str) -> Path | None:
         if candidate.exists() and candidate.suffix.lower() == ".pdf":
             return candidate
     return None
+
+
+def _resolve_output_file(case_id: str, filename: str) -> Path | None:
+    safe_name = Path(filename).name
+    base = output_dir(case_id).resolve()
+    target = (base / safe_name).resolve()
+    if base in target.parents and target.exists() and target.is_file():
+        return target
+    return None
+
+
+def _open_local_file(target: Path) -> None:
+    try:
+        system = platform.system()
+        if system == "Darwin":
+            subprocess.Popen(["open", str(target)])
+        elif system == "Windows":
+            os.startfile(str(target))  # type: ignore[attr-defined]
+        else:
+            subprocess.Popen(["xdg-open", str(target)])
+    except OSError:
+        pass
+
+
+def _zip_name(files: list[Path]) -> str:
+    first = files[0].stem
+    if first.endswith("_client_booklet"):
+        first = first.removesuffix("_client_booklet")
+    return f"{first}_all.zip"
+
+
+def _file_label(label: str) -> str:
+    labels = {
+        "client_booklet": "客户资料手册",
+        "client_acknowledgement": "客户确认书",
+        "risk_assessment": "风险评估表",
+        "service_appointment": "服务委任函",
+        "policy_import": "C系统导入表",
+        "report": "转换报告",
+    }
+    return labels.get(label, label)
+
+
+def _file_ext(path: Path) -> str:
+    suffix = path.suffix.replace(".", "").upper()
+    if suffix == "JSON":
+        return "LOG"
+    return suffix or "FILE"
+
+
+def _content_disposition(filename: str, attachment: bool) -> str:
+    disposition = "attachment" if attachment else "inline"
+    fallback = re.sub(r"[^A-Za-z0-9._-]+", "_", filename) or "download"
+    encoded = quote(filename, safe="")
+    return f"{disposition}; filename=\"{fallback}\"; filename*=UTF-8''{encoded}"
 
 
 def run(host: str = HOST, port: int = PORT) -> None:

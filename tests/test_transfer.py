@@ -16,6 +16,7 @@ import os
 
 ROOT = Path(os.environ.get("POLICY_TRANSFER_SAMPLE_ROOT", "/Users/anthony/Documents/transfer"))
 A_FILES = [ROOT / "A" / "Document.pdf", ROOT / "A" / "Document-3.pdf"]
+EPOLICY_FILE = ROOT / "A" / "ePolicy_ZENG DONGLING_14260829 (ZENG01896130).PDF"
 
 
 def main() -> None:
@@ -25,6 +26,7 @@ def main() -> None:
         print("Portable tests passed.")
         return
     test_prudential_extract()
+    test_prudential_epolicy_priority()
     test_export_bundle()
     test_future_extractor_shape()
     print("All tests passed.")
@@ -47,6 +49,19 @@ def test_prudential_extract() -> None:
     assert case.payment_mode.value == "ANNUALLY"
     assert float(case.total_modal_premium.value) == 595.81
     assert case.products, "products should be extracted"
+
+
+def test_prudential_epolicy_priority() -> None:
+    if not EPOLICY_FILE.exists():
+        return
+    case = PrudentialExtractor().extract([ExtractionInput(EPOLICY_FILE.name, EPOLICY_FILE.read_bytes())])
+    assert case.policy_no.value == "000014260829"
+    assert case.policy_date.value == "2026-03-31"
+    assert case.first_premium_date.value == "2026-04-01"
+    assert float(case.total_modal_premium.value) == 595.21
+    premiums = {product.code.value: product.modal_premium.value for product in case.products}
+    assert float(premiums["CIM3"]) == 238.05
+    assert float(premiums["MLP"]) == 357.16
 
 
 def test_export_bundle() -> None:

@@ -193,28 +193,55 @@ class PrudentialExtractor:
             case.proposer.id_number = fv(compact(proposer_id.group(1)), 0.98, page, proposer_id.group(0), True)
             case.proposer.travel_permit_number = fv(compact(proposer_id.group(2)), 0.95, page, proposer_id.group(0))
 
+        proposer_segment = self._section_after(all_text, "Proposer Personal Details投保人個人資料")
+        occupation = re.search(
+            r"Occupation Details職業詳情\s+Name of Employer僱主名稱\s+(.+?)\s+Business Nature業務性質\s+(.+?)\s+Occupation & Duties職業及工作性質\s+(.+?)\s+Business Address公司地址\s+(.+?)\s+Address and Contact Information",
+            proposer_segment,
+            re.S,
+        )
+        if occupation:
+            page = self._page_for(pages, occupation.group(0))
+            case.proposer.employer = fv(compact(occupation.group(1)), 0.94, page, occupation.group(0))
+            case.proposer.business_nature = fv(compact(occupation.group(2)), 0.94, page, occupation.group(0))
+            case.proposer.occupation = fv(self._occupation_title(occupation.group(3)), 0.94, page, occupation.group(0))
+            case.proposer.business_address = fv(compact(occupation.group(4)), 0.9, page, occupation.group(0))
+
         contact = re.search(
-            r"Name of Employer僱主名稱\s+(.+?)\s+Business Nature業務性質\s+(.+?)\s+Occupation & Duties職業及工作性質\s+(.+?)\s+Business Address公司地址\s+(.+?)\s+Address and Contact Information.*?Residential Address居住地址\s+(.+?)\s+Mobile No\.手提電話\s+\(China\)\s*86-([0-9]+)\s+Residential No.*?E-mail Address電郵地址\s+([^\s]+)",
-            all_text,
+            r"Address and Contact Information\s*地址及聯絡資料.*?Residential Address居住地址\s+(.+?)\s+Mobile No\.手提電話\s+(?:\(China\)\s*86-([0-9]+)|N/A\s+不適用)\s+Residential No.*?E-mail Address電郵地址\s+([^\n]+)",
+            proposer_segment,
             re.S,
         )
         if contact:
             page = self._page_for(pages, contact.group(0))
-            case.proposer.employer = fv(compact(contact.group(1)), 0.9, page, contact.group(0))
-            case.proposer.business_nature = fv(compact(contact.group(2)), 0.9, page, contact.group(0))
-            case.proposer.occupation = fv(compact(contact.group(3)), 0.9, page, contact.group(0))
-            case.proposer.business_address = fv(compact(contact.group(4)), 0.85, page, contact.group(0))
-            case.proposer.residential_address = fv(compact(contact.group(5)), 0.88, page, contact.group(0), True)
+            case.proposer.residential_address = fv(compact(contact.group(1)), 0.92, page, contact.group(0), True)
             case.proposer.correspondence_address = case.proposer.residential_address
-            case.proposer.phone_country_code = fv("86", 0.98, page, contact.group(0))
-            case.proposer.phone = fv(compact(contact.group(6)), 0.98, page, contact.group(0))
-            case.proposer.email = fv(compact(contact.group(7)), 0.98, page, contact.group(0))
+            if contact.group(2):
+                case.proposer.phone_country_code = fv("86", 0.98, page, contact.group(0))
+                case.proposer.phone = fv(compact(contact.group(2)), 0.98, page, contact.group(0))
+            email = compact(contact.group(3))
+            if not email.startswith("N/A"):
+                case.proposer.email = fv(email, 0.98, page, contact.group(0))
+
+        education = re.search(r"Education Level\s*教育程度\s+(.+?)\s+\*?Are you holding", all_text, re.S | re.I)
+        if education:
+            page = self._page_for(pages, education.group(0))
+            case.proposer.education_level = fv(compact(education.group(1)), 0.94, page, education.group(0))
 
         insured_address = re.search(r"Residential Address居住地址\s+(.+?)\s+Mobile No\.手提電話\s+N/A", all_text, re.S)
         if insured_address:
             page = self._page_for(pages, insured_address.group(0))
             case.insured.residential_address = fv(compact(insured_address.group(1)), 0.88, page, insured_address.group(0), True)
             case.insured.correspondence_address = case.insured.residential_address
+
+    def _section_after(self, text: str, marker: str) -> str:
+        index = text.find(marker)
+        return text[index:] if index >= 0 else text
+
+    def _occupation_title(self, value: str) -> str:
+        text = compact(value)
+        text = re.sub(r"^Profession\s+專業人士\s*", "", text, flags=re.I)
+        chinese_parts = re.findall(r"[\u3400-\u9fff]+", text)
+        return chinese_parts[-1] if chinese_parts else text
 
     def _extract_products(self, pages: list[PageText], case: PolicyCase) -> list[ProductLine]:
         assurance_pages = [page for page in pages if "Details of Assurance保險計劃詳情" in page.text or "Premium Payment Details保費資料詳情" in page.text]

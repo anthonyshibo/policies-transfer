@@ -88,6 +88,8 @@ def _client_booklet_values(case: PolicyCase) -> dict[str, object]:
     insured = case.insured
     fin = case.financial
     products = ", ".join(str(p.name.value) for p in case.products if p.name.value)
+    proposer_chinese = _split_chinese_name(proposer.chinese_name.value)
+    insured_chinese = _split_chinese_name(insured.chinese_name.value)
     return {
         "income_Monthly Average Salary": _number(fin.monthly_income.value),
         "income_Average Bonus": _number(fin.monthly_unearned_income.value),
@@ -98,6 +100,8 @@ def _client_booklet_values(case: PolicyCase) -> dict[str, object]:
         "Expenses_Monthly Average Total": _number(fin.monthly_expenses.value),
         "Expenses_Yearly Average Total": _number(_times_12(fin.monthly_expenses.value)),
         "assets_Cash and Deposits": _number(fin.liquid_assets.value),
+        "assets_Others liquid": "0",
+        "assets_Estimated Total Liquid": _number(fin.liquid_assets.value),
         "assets_Fixed": _number(fin.fixed_assets.value),
         "assets_Total": _number(_sum_numbers(fin.liquid_assets.value, fin.fixed_assets.value)),
         "liability_Estimated Total": _number(fin.liabilities.value),
@@ -106,12 +110,45 @@ def _client_booklet_values(case: PolicyCase) -> dict[str, object]:
         "ID/ Passport No": proposer.id_number.value,
         "Product Name": products,
         "Payment Term": case.products[0].premium_term.value if case.products else "",
+        "Dropdown_fna1": products,
+        "Dropdown_fna1-1": case.products[0].premium_term.value if case.products else "",
         "Appointment Date": _display_date(case.sign_date.value),
         "Name & License": _tr_name_license(case),
         "Client": _english_name(case),
         "Insured": " ".join(part for part in [insured.english_family_name.value, insured.english_given_name.value] if part),
         "Coverage/ Premium": _coverage_premium(case),
         "Nationality": _country_display(proposer.nationality.value),
+        "Fullname": _english_name(case),
+        "Surname": proposer.english_family_name.value,
+        "Given Name": proposer.english_given_name.value,
+        "Surname_C": proposer_chinese[0],
+        "Given Name_C": proposer_chinese[1],
+        "Date of Birth": _display_date(proposer.date_of_birth.value),
+        "Residential Address": proposer.residential_address.value,
+        "Mobile": _phone(proposer.phone_country_code.value, proposer.phone.value),
+        "Email": proposer.email.value,
+        "Identity": proposer.id_number.value,
+        "Place of Birth": _country_display(proposer.place_of_birth.value),
+        "fill_6-1": _country_display(proposer.nationality.value),
+        "fill_7-1": proposer.id_number.value,
+        "Occupation 職業": proposer.occupation.value,
+        "Nature of Business 業務性質": proposer.business_nature.value,
+        "company name 公司名字": proposer.employer.value,
+        "company address 公司地址": proposer.business_address.value or proposer.residential_address.value,
+        "Education": _education_choice(proposer.education_level.value),
+        "Group1": _title_choice(proposer.sex.value),
+        "Group2": _sex_choice(proposer.sex.value),
+        "Marital Status": _marital_choice(proposer.marital_status.value),
+        "Surname_2": insured.english_family_name.value,
+        "Given Name_2": insured.english_given_name.value,
+        "Surname_C2": insured_chinese[0],
+        "Given Name_C2": insured_chinese[1],
+        "DOB_2": _display_date(insured.date_of_birth.value),
+        "Residential Address_2": insured.residential_address.value,
+        "Nationality_2": _country_display(insured.nationality.value),
+        "Identification_2": insured.id_number.value,
+        "Place of Birth2": insured.place_of_birth.value,
+        "Group8": _insured_sex_choice(insured.sex.value),
     }
 
 
@@ -161,6 +198,73 @@ def _country_display(value: object) -> str:
     if text.lower() == "china" or "中國" in text:
         return "中國"
     return text
+
+
+def _phone(country_code: object, phone: object) -> str:
+    parts = [str(country_code or "").strip(), str(phone or "").strip()]
+    return "-".join(part for part in parts if part)
+
+
+def _split_chinese_name(value: object) -> tuple[str, str]:
+    text = str(value or "").strip()
+    if not text:
+        return "", ""
+    if len(text) == 1:
+        return text, ""
+    return text[:1], text[1:]
+
+
+def _title_choice(sex: object) -> str:
+    text = str(sex or "").upper()
+    if "F" in text or "女" in text:
+        return "/Choice3"
+    if "M" in text or "男" in text:
+        return "/Choice1"
+    return ""
+
+
+def _sex_choice(sex: object) -> str:
+    text = str(sex or "").upper()
+    if "F" in text or "女" in text:
+        return "/Choice2"
+    if "M" in text or "男" in text:
+        return "/Choice1"
+    return ""
+
+
+def _insured_sex_choice(sex: object) -> str:
+    text = str(sex or "").upper()
+    if "M" in text or "男" in text:
+        return "/Choice1"
+    if "F" in text or "女" in text:
+        return "/2"
+    return ""
+
+
+def _marital_choice(value: object) -> str:
+    text = str(value or "").lower()
+    if "single" in text or "未婚" in text:
+        return "/Choice1"
+    if "married" in text or "已婚" in text:
+        return "/Choice2"
+    if "divorc" in text or "離婚" in text:
+        return "/Choice3"
+    if "separat" in text or "分居" in text:
+        return "/Choice4"
+    return ""
+
+
+def _education_choice(value: object) -> str:
+    text = str(value or "").lower()
+    if "primary" in text or "小學" in text:
+        return "/Choice1"
+    if "secondary" in text or "advance" in text or "中學" in text or "預科" in text:
+        return "/Choice2"
+    if "tertiary" in text or "university" in text or "大專" in text or "大學" in text:
+        return "/Choice3"
+    if text:
+        return "/Choice4"
+    return ""
 
 
 def _coverage_premium(case: PolicyCase) -> str:

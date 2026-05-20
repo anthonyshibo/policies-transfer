@@ -560,7 +560,8 @@ def _review(case_id: str, case) -> str:
 
 def _exported(case_id: str, files: dict[str, Path]) -> str:
     links = []
-    for label, path in files.items():
+    visible_files = {label: path for label, path in files.items() if label != "report"}
+    for label, path in visible_files.items():
         links.append(
             f"<li><a class='download-card' href='/open-file/{case_id}/{quote(path.name)}' title='打开文件' data-open-file='1'>"
             f"<span class='file-badge'>{html.escape(_file_ext(path))}</span>"
@@ -583,7 +584,7 @@ def _exported(case_id: str, files: dict[str, Path]) -> str:
     </div>
   </div>
   <div class="done-content">
-    <div class="done-subhead"><h2>输出文件</h2><span>{len(files)} 个文件</span></div>
+    <div class="done-subhead"><h2>输出文件</h2><span>{len(visible_files)} 个文件</span></div>
     <ul class="downloads">{''.join(links)}</ul>
   </div>
 </section>"""

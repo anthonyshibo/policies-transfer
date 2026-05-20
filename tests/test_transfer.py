@@ -47,6 +47,11 @@ def test_prudential_extract() -> None:
     assert case.proposer.english_family_name.value == "ZENG"
     assert case.proposer.english_given_name.value == "DONGLING"
     assert case.proposer.id_number.value == "440821197001240049"
+    assert case.proposer.occupation.value == "總經理"
+    assert case.proposer.business_nature.value == "製造業"
+    assert case.proposer.employer.value == "廣東吴川市博鋪街道辦興強鞋廠"
+    assert case.proposer.residential_address.value == "中國廣東吴川市博鋪街道辦 興強鞋廠"
+    assert case.proposer.education_level.value == "Secondary School 中學"
     assert case.insured.english_family_name.value == "OU"
     assert case.insured.english_given_name.value == "MINGHAO"
     assert case.insured.id_number.value == "Q440627592"
@@ -63,6 +68,9 @@ def test_prudential_epolicy_priority() -> None:
     assert case.policy_no.value == "000014260829"
     assert case.policy_date.value == "2026-03-31"
     assert case.first_premium_date.value == "2026-04-01"
+    assert case.proposer.occupation.value == "總經理"
+    assert case.proposer.business_nature.value == "製造業"
+    assert case.proposer.residential_address.value == "中國廣東吴川市博鋪街道辦 興強鞋廠"
     assert float(case.total_modal_premium.value) == 595.21
     premiums = {product.code.value: product.modal_premium.value for product in case.products}
     assert float(premiums["CIM3"]) == 238.05
@@ -81,6 +89,19 @@ def test_export_bundle() -> None:
         booklet_fields = PdfReader(str(files["client_booklet"])).get_fields() or {}
         assert booklet_fields["Dropdown_fn2"].get("/V") in ("", None)
         assert booklet_fields["Check Box_Product"].get("/V") == "/Off"
+        assert booklet_fields["Surname"].get("/V") == "ZENG"
+        assert booklet_fields["Given Name"].get("/V") == "DONGLING"
+        assert booklet_fields["Identity"].get("/V") == "440821197001240049"
+        assert booklet_fields["Occupation 職業"].get("/V") == "總經理"
+        assert booklet_fields["Nature of Business 業務性質"].get("/V") == "製造業"
+        assert booklet_fields["company name 公司名字"].get("/V") == "廣東吴川市博鋪街道辦興強鞋廠"
+        assert booklet_fields["assets_Cash and Deposits"].get("/V") == "1000000"
+        assert booklet_fields["assets_Others liquid"].get("/V") == "0"
+        assert booklet_fields["assets_Estimated Total Liquid"].get("/V") == "1000000"
+        assert booklet_fields["Education"].get("/V") == "/Choice2"
+        assert booklet_fields["Surname_2"].get("/V") == "OU"
+        assert booklet_fields["Given Name_2"].get("/V") == "MINGHAO"
+        assert booklet_fields["Identification_2"].get("/V") == "Q440627592"
         booklet_reader = PdfReader(str(files["client_booklet"]))
         assert b"policy-transfer diagonal skip mark" not in booklet_reader.pages[4]._get_contents_as_bytes()
         assert b"policy-transfer diagonal skip mark" in booklet_reader.pages[5]._get_contents_as_bytes()

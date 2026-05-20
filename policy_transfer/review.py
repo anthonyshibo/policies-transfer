@@ -48,6 +48,7 @@ VISIBLE_FIELDS = [
     "proposer.business_nature",
     "proposer.occupation",
     "proposer.business_address",
+    "proposer.education_level",
     "insured.english_family_name",
     "insured.english_given_name",
     "insured.chinese_name",
@@ -116,6 +117,7 @@ FIELD_SECTIONS: list[tuple[str, str, list[str]]] = [
             "proposer.business_nature",
             "proposer.occupation",
             "proposer.business_address",
+            "proposer.education_level",
         ],
     ),
     (
@@ -204,6 +206,7 @@ FIELD_LABELS: dict[str, tuple[str, str, str]] = {
     "proposer.business_nature": ("投保人行业性质", "Proposer business nature", "用于 B 客户资料手册及 C 导入表。"),
     "proposer.occupation": ("投保人职业/职位", "Proposer occupation", "用于 B 客户资料手册及 C 导入表。"),
     "proposer.business_address": ("投保人公司地址", "Proposer business address", "用于 B 客户资料手册及 C 导入表。"),
+    "proposer.education_level": ("投保人教育程度", "Proposer education level", "用于 B 客户资料手册 Education Level 勾选。"),
     "insured.english_family_name": ("受保人英文姓", "Insured English family name", "用于 B 文件及 C 导入表。"),
     "insured.english_given_name": ("受保人英文名", "Insured English given name", "用于 B 文件及 C 导入表。"),
     "insured.chinese_name": ("受保人中文姓名", "Insured Chinese name", "用于 B 文件及 C 导入表。"),

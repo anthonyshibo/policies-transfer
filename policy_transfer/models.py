@@ -44,6 +44,7 @@ class Person:
     business_nature: FieldValue = field(default_factory=FieldValue)
     occupation: FieldValue = field(default_factory=FieldValue)
     business_address: FieldValue = field(default_factory=FieldValue)
+    education_level: FieldValue = field(default_factory=FieldValue)
 
 
 @dataclass

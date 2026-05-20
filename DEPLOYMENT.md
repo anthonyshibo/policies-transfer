@@ -82,6 +82,11 @@ pip install -r requirements.txt
 
 export POLICY_TRANSFER_B_DIR="/Users/anthony/Documents/transfer/B"
 export POLICY_TRANSFER_C_TEMPLATE="/Users/anthony/Documents/transfer/C/policy-import-v181.xlsx"
+export POLICY_TRANSFER_SUPPLIER_CHANNEL="BP-Acorn Insurance Brokers Limited"
+export POLICY_TRANSFER_SUPPLIER_CHANNEL_CODE="acorn.insurance"
+export POLICY_TRANSFER_SUPPLIER_USER_ACCOUNT="acorn.insurance"
+export POLICY_TRANSFER_NEW_BROKER_COMPANY="Finexis Advisory (HK) Limited"
+export POLICY_TRANSFER_NEW_BROKER_LICENSE_NO="FB1593"
 
 python -m policy_transfer.server
 ```

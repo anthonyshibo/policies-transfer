@@ -21,6 +21,32 @@ http://127.0.0.1:8787
 - `/Users/anthony/Documents/transfer/B`
 - `/Users/anthony/Documents/transfer/C/policy-import-v181.xlsx`
 
+可通过环境变量覆盖模板和业务机构配置：
+
+- `POLICY_TRANSFER_B_DIR`
+- `POLICY_TRANSFER_C_TEMPLATE`
+- `POLICY_TRANSFER_SUPPLIER_CHANNEL`
+- `POLICY_TRANSFER_SUPPLIER_CHANNEL_CODE`
+- `POLICY_TRANSFER_SUPPLIER_USER_ACCOUNT`
+- `POLICY_TRANSFER_NEW_BROKER_COMPANY`
+- `POLICY_TRANSFER_NEW_BROKER_LICENSE_NO`
+- `POLICY_TRANSFER_TR_REPRESENTATIVES`
+
+TR 人员下拉名单默认读取：
+
+```text
+config/tr_representatives.csv
+```
+
+格式：
+
+```csv
+name,ia_no
+CHAN TAI MAN,TR123456
+```
+
+首页默认使用原始文档抽取的 TR name / IA 号码；如果选择配置名单或手工输入，则以首页指定值为准。
+
 ## Test
 
 ```bash
@@ -31,12 +57,12 @@ http://127.0.0.1:8787
 
 每个转换任务会生成：
 
-- `client-booklet.pdf`
-- `client-acknowledgement.pdf`
-- `risk-assessment.pdf`
-- `service-appointment.docx`
-- `policy-import.xlsx`
-- `conversion-report.json`
+- `transfer_{holder}_{policy_no}_client_booklet.pdf`
+- `transfer_{holder}_{policy_no}_ack.pdf`
+- `transfer_{holder}_{policy_no}_risk.pdf`
+- `transfer_{holder}_{policy_no}_appointment.docx`
+- `transfer_{holder}_{policy_no}_policy_import.xlsx`
+- `transfer_{holder}_{policy_no}_report.json`
 
 ## Architecture
 
@@ -44,4 +70,3 @@ http://127.0.0.1:8787
 - `policy_transfer.models`: 统一中间数据模型。
 - `policy_transfer.exporters`: B 公司文件和 C Excel 导出。
 - `policy_transfer.server`: 无外部 Web 框架依赖的本地网页工具。
-

@@ -7,7 +7,7 @@ from pathlib import Path
 from policy_transfer.config import B_ACK, B_CLIENT_BOOKLET, B_RISK, B_SERVICE_DOCX, DEFAULT_C_TEMPLATE
 from policy_transfer.exporters.docx_export import export_service_appointment
 from policy_transfer.exporters.excel_export import export_policy_import
-from policy_transfer.exporters.pdf_forms import fill_pdf_form
+from policy_transfer.exporters.pdf_forms import add_diagonal_line_marks, fill_pdf_form
 from policy_transfer.models import PolicyCase
 
 
@@ -28,7 +28,8 @@ def export_bundle(case: PolicyCase, output_dir: Path) -> dict[str, Path]:
 
     fill_pdf_form(B_ACK, files["client_acknowledgement"], _ack_values(case))
     fill_pdf_form(B_RISK, files["risk_assessment"], _risk_values(case))
-    fill_pdf_form(B_CLIENT_BOOKLET, files["client_booklet"], _client_booklet_values(case))
+    fill_pdf_form(B_CLIENT_BOOKLET, files["client_booklet"], _client_booklet_values(case), clear_unmapped=True)
+    add_diagonal_line_marks(files["client_booklet"], first_page=6, last_page=12)
     export_service_appointment(B_SERVICE_DOCX, files["service_appointment"], case)
     export_policy_import(DEFAULT_C_TEMPLATE, files["policy_import"], case)
 

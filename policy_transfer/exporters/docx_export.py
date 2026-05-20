@@ -5,6 +5,7 @@ from pathlib import Path
 
 from docx import Document
 
+from policy_transfer.config import NEW_BROKER_COMPANY, NEW_BROKER_LICENSE_NO
 from policy_transfer.models import PolicyCase
 
 
@@ -25,7 +26,7 @@ def export_service_appointment(template: Path, output: Path, case: PolicyCase) -
         elif "本人" in text and "身份证号码" in text:
             paragraph.text = (
                 f"本人____{proposer_cn}______, 身份证号码_{proposer_id}___，謹此函確認，"
-                "將委任Finexis Advisory (HK) Limited（牌照号码：FB1593）为本人新的保險經紀公司."
+                f"將委任{NEW_BROKER_COMPANY}（牌照号码：{NEW_BROKER_LICENSE_NO}）为本人新的保險經紀公司."
             )
         elif "另委任 業務代表" in text:
             paragraph.text = (

@@ -6,6 +6,7 @@ from typing import Any
 
 from openpyxl import load_workbook
 
+from policy_transfer.config import SUPPLIER_CHANNEL, SUPPLIER_CHANNEL_CODE, SUPPLIER_USER_ACCOUNT
 from policy_transfer.models import PolicyCase, ProductLine
 
 
@@ -86,9 +87,9 @@ def _policy_row(ws, case: PolicyCase, product: ProductLine, product_lookup: dict
         "保障地區（醫療險適用）": product.medical_region.value or "",
         "自付額（醫療險適用）": product.deductible.value or "",
         "附加保障（醫療險適用）": product.rider_benefit.value or "",
-        "供應渠道*": "BP-Acorn Insurance Brokers Limited",
-        "供應渠道碼*": "acorn.insurance",
-        "用戶賬號*": "acorn.insurance",
+        "供應渠道*": SUPPLIER_CHANNEL,
+        "供應渠道碼*": SUPPLIER_CHANNEL_CODE,
+        "用戶賬號*": SUPPLIER_USER_ACCOUNT,
         "業務代表1*": _tr_account(case),
         "申請人類型*": "INDIVIDUAL",
         "投保人是否合資格投資者*": False,
@@ -171,12 +172,6 @@ def _resolve_product(product: ProductLine, lookup: dict[str, tuple[str, str]]) -
     for key, value in lookup.items():
         if name and (name in key or key in name):
             return value
-    if product.code.value:
-        code = str(product.code.value)
-        if code == "CIM3":
-            return ("誠保一生危疾保", "PRU:CIM3")
-        if code == "MLP":
-            return ("終身保醫療計劃(附加計劃)", "PRU:MLP")
     return (name, str(product.code.value or ""))
 
 
@@ -199,5 +194,4 @@ def _relationship_code(value: object) -> str:
 
 def _tr_account(case: PolicyCase) -> str:
     name = str(case.tr_name.value or "").lower().replace(" ", ".")
-    return name or "ng.ka.ho"
-
+    return name

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import cgi
+import csv
 import html
 import os
 import mimetypes
@@ -15,9 +16,10 @@ from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
 from policy_transfer.case_store import create_case, load_case, output_dir, save_case, upload_dir
-from policy_transfer.config import DEFAULT_TRANSFER_DIR
+from policy_transfer.config import DEFAULT_TRANSFER_DIR, TR_REPRESENTATIVES_FILE
 from policy_transfer.exporters import export_bundle
 from policy_transfer.extractors import ExtractionInput, detect_extractor
+from policy_transfer.models import FieldValue
 from policy_transfer.review import apply_updates, field_label, field_usage, review_sections, translated_issue
 from policy_transfer.source_preview import crop_for_field
 
@@ -93,6 +95,7 @@ class Handler(BaseHTTPRequestHandler):
             raise ValueError("请至少上传一份 PDF。")
         extractor = detect_extractor(files)
         case = extractor.extract(files)
+        _apply_tr_override(case, form)
         case_id = create_case(case)
         case_upload_dir = upload_dir(case_id)
         for item in files:
@@ -265,6 +268,15 @@ def _layout(content: str) -> str:
     .upload-box:hover {{ transform: translateY(-3px); border-color: #99d5ce; box-shadow: 0 16px 34px rgba(15, 23, 42, .10); }}
     .upload-box h2 {{ margin: 0 0 6px; font-size: 16px; }}
     .upload-box p {{ margin: 0 0 12px; font-size: 13px; }}
+    .tr-panel {{ margin-top: 18px; border: 1px solid var(--line); border-radius: 8px; padding: 18px; background: #fff; box-shadow: 0 8px 18px rgba(15, 23, 42, .04); }}
+    .tr-panel h2 {{ margin: 0 0 6px; font-size: 16px; }}
+    .tr-panel p {{ margin: 0 0 12px; font-size: 13px; }}
+    .tr-mode {{ display: flex; flex-wrap: wrap; gap: 12px; margin: 10px 0 14px; color: #344054; font-size: 13px; }}
+    .tr-mode label {{ display: inline-flex; align-items: center; gap: 6px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 7px; background: #fbfcff; }}
+    .tr-fields {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }}
+    .tr-fields label {{ display: grid; gap: 6px; color: #344054; font-size: 13px; font-weight: 650; }}
+    .tr-fields input, .tr-fields select {{ width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 7px; background: #fff; color: var(--ink); font-size: 14px; }}
+    .tr-pane[hidden] {{ display: none; }}
     .home-note {{ margin-top: 20px; padding: 14px 16px; border: 1px solid #dbe7f3; border-radius: 8px; background: #f8fbff; color: var(--muted); font-size: 13px; line-height: 1.55; }}
     .section-title {{ display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 26px 0 10px; padding-bottom: 8px; border-bottom: 2px solid #c7d7fe; }}
     .section-title h2 {{ margin: 0; font-size: 18px; }}
@@ -315,7 +327,7 @@ def _layout(content: str) -> str:
     .open-hint {{ color: #0f766e; font-size: 13px; font-weight: 700; opacity: 0; transform: translateX(-4px); transition: opacity .16s ease, transform .16s ease; }}
     .download-card:hover .open-hint {{ opacity: 1; transform: translateX(0); }}
     code {{ background: #edf2f7; padding: 2px 5px; border-radius: 4px; }}
-    @media (max-width: 760px) {{ main {{ padding: 16px; }} table {{ display:block; overflow:auto; }} header {{ padding: 0 16px; }} .upload-grid {{ grid-template-columns: 1fr; }} .done-hero {{ grid-template-columns: 1fr; }} .done-actions, .home-actions {{ justify-content: flex-start; }} }}
+    @media (max-width: 760px) {{ main {{ padding: 16px; }} table {{ display:block; overflow:auto; }} header {{ padding: 0 16px; }} .upload-grid, .tr-fields {{ grid-template-columns: 1fr; }} .done-hero {{ grid-template-columns: 1fr; }} .done-actions, .home-actions {{ justify-content: flex-start; }} }}
   </style>
 </head>
 <body>
@@ -354,13 +366,22 @@ def _layout(content: str) -> str:
         }});
       }}
     }});
+    document.addEventListener('change', function (event) {{
+      if (!event.target.matches('input[name="tr_mode"]')) return;
+      const mode = event.target.value;
+      document.querySelectorAll('.tr-pane').forEach(function (node) {{
+        node.hidden = node.getAttribute('data-tr-pane') !== mode;
+      }});
+    }});
   </script>
 </body>
 </html>"""
 
 
 def _home() -> str:
-    return """<section class="panel home-panel">
+    tr_options = _tr_option_html()
+    config_disabled = " disabled" if not tr_options else ""
+    return f"""<section class="panel home-panel">
   <div class="home-hero">
     <div class="home-title"><span class="home-mark">PT</span><h1>保单转单工具</h1></div>
     <p>上传 Prudential 保单文件与财务资料，系统会抽取关键字段；确认无误后，一次生成 B 公司文件和 C 系统导入表。</p>
@@ -379,11 +400,81 @@ def _home() -> str:
         <input type="file" name="financial_files" accept="application/pdf" multiple>
       </div>
     </div>
+    <div class="tr-panel">
+      <h2>业务代表 / Technical representative</h2>
+      <p>默认使用原始文档提取的 TR name 和 IA 号码；如本次转单更换了 TR，可在这里指定，指定后会覆盖文档抽取值。</p>
+      <div class="tr-mode">
+        <label><input type="radio" name="tr_mode" value="document" checked> 从原始文档提取</label>
+        <label><input type="radio" name="tr_mode" value="configured"{config_disabled}> 从配置名单选择</label>
+        <label><input type="radio" name="tr_mode" value="manual"> 手工输入</label>
+      </div>
+      <div class="tr-pane" data-tr-pane="configured" hidden>
+        <div class="tr-fields">
+          <label>选择 TR
+            <select name="tr_selected"{config_disabled}>
+              <option value="">请选择</option>
+              {tr_options}
+            </select>
+          </label>
+        </div>
+      </div>
+      <div class="tr-pane" data-tr-pane="manual" hidden>
+        <div class="tr-fields">
+          <label>TR name / 业务代表姓名<input name="manual_tr_name" autocomplete="off"></label>
+          <label>IA number / IA 号码<input name="manual_tr_license_no" autocomplete="off"></label>
+        </div>
+      </div>
+    </div>
     <div class="actions home-actions"><button class="primary" type="submit">上传并抽取</button></div>
   </form>
-  <div class="home-note">第一版支持当前 Prudential 样本格式。未来新增保险公司时，只需新增 extractor，不需要重写导出逻辑。</div>
+  <div class="home-note">TR 配置文件：<code>{html.escape(str(TR_REPRESENTATIVES_FILE))}</code>。第一版支持当前 Prudential 样本格式；未来新增保险公司时，只需新增 extractor，不需要重写导出逻辑。</div>
   </div>
 </section>"""
+
+
+def _load_tr_representatives() -> list[dict[str, str]]:
+    if not TR_REPRESENTATIVES_FILE.exists():
+        return []
+    with TR_REPRESENTATIVES_FILE.open("r", encoding="utf-8-sig", newline="") as handle:
+        rows = []
+        for row in csv.DictReader(handle):
+            name = (row.get("name") or "").strip()
+            ia_no = (row.get("ia_no") or row.get("license_no") or "").strip()
+            if name or ia_no:
+                rows.append({"name": name, "ia_no": ia_no})
+        return rows
+
+
+def _tr_option_html() -> str:
+    options = []
+    for idx, item in enumerate(_load_tr_representatives()):
+        label = " / ".join(part for part in [item["name"], item["ia_no"]] if part)
+        options.append(f"<option value='{idx}'>{html.escape(label)}</option>")
+    return "".join(options)
+
+
+def _apply_tr_override(case, form: cgi.FieldStorage) -> None:
+    mode = (form.getfirst("tr_mode") or "document").strip()
+    name = ""
+    license_no = ""
+    if mode == "configured":
+        selected = (form.getfirst("tr_selected") or "").strip()
+        representatives = _load_tr_representatives()
+        if selected.isdigit() and int(selected) < len(representatives):
+            representative = representatives[int(selected)]
+            name = representative["name"]
+            license_no = representative["ia_no"]
+    elif mode == "manual":
+        name = (form.getfirst("manual_tr_name") or "").strip()
+        license_no = (form.getfirst("manual_tr_license_no") or "").strip()
+
+    if not name and not license_no:
+        return
+    source_note = "Manually selected on upload page." if mode == "configured" else "Manually entered on upload page."
+    if name:
+        case.tr_name = FieldValue(name, 1.0, None, False, False, source_note)
+    if license_no:
+        case.tr_license_no = FieldValue(license_no, 1.0, None, False, False, source_note)
 
 
 def _review(case_id: str, case) -> str:

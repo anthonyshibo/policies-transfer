@@ -30,7 +30,7 @@ def _default_path(env_name: str, project_path: Path, dev_path: Path) -> Path:
 
 DEFAULT_B_DIR = _default_path("POLICY_TRANSFER_B_DIR", PROJECT_B_DIR, DEFAULT_TRANSFER_DIR / "B")
 DEFAULT_C_TEMPLATE = _default_path("POLICY_TRANSFER_C_TEMPLATE", PROJECT_C_TEMPLATE, DEFAULT_TRANSFER_DIR / "C" / "policy-import-v181.xlsx")
-TR_REPRESENTATIVES_FILE = _default_path("POLICY_TRANSFER_TR_REPRESENTATIVES", PROJECT_TR_REPRESENTATIVES, DEFAULT_TRANSFER_DIR / "tr_representatives.csv")
+TR_REPRESENTATIVES_FILE = Path(os.environ.get("POLICY_TRANSFER_TR_REPRESENTATIVES", PROJECT_TR_REPRESENTATIVES))
 
 SUPPLIER_CHANNEL = os.environ.get("POLICY_TRANSFER_SUPPLIER_CHANNEL", "BP-Acorn Insurance Brokers Limited")
 SUPPLIER_CHANNEL_CODE = os.environ.get("POLICY_TRANSFER_SUPPLIER_CHANNEL_CODE", "acorn.insurance")
@@ -47,5 +47,6 @@ B_SERVICE_DOCX = DEFAULT_B_DIR / "保单服务委任函_曾冬灵.docx"
 for directory in (CONFIG_DIR, DATA_DIR, CASES_DIR, OUTPUT_DIR):
     directory.mkdir(parents=True, exist_ok=True)
 
-if not PROJECT_TR_REPRESENTATIVES.exists():
-    PROJECT_TR_REPRESENTATIVES.write_text("name,ia_no\n", encoding="utf-8")
+if not TR_REPRESENTATIVES_FILE.exists():
+    TR_REPRESENTATIVES_FILE.parent.mkdir(parents=True, exist_ok=True)
+    TR_REPRESENTATIVES_FILE.write_text("name,ia_no\n", encoding="utf-8")

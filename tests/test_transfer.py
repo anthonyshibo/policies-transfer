@@ -86,6 +86,9 @@ def test_export_bundle() -> None:
         assert b"policy-transfer diagonal skip mark" in booklet_reader.pages[5]._get_contents_as_bytes()
         assert b"policy-transfer diagonal skip mark" in booklet_reader.pages[11]._get_contents_as_bytes()
         assert b"policy-transfer diagonal skip mark" not in booklet_reader.pages[12]._get_contents_as_bytes()
+        assert b"policy-transfer normalized page number" not in booklet_reader.pages[0]._get_contents_as_bytes()
+        assert b"(1/12) Tj" in booklet_reader.pages[1]._get_contents_as_bytes()
+        assert b"(12/12) Tj" in booklet_reader.pages[12]._get_contents_as_bytes()
         wb = load_workbook(files["policy_import"], data_only=True)
         assert "policy" in wb.sheetnames
         assert wb["policy"]["C2"].value == "000014260829"

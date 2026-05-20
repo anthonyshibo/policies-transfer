@@ -1,9 +1,15 @@
 from __future__ import annotations
 
 import os
+import sys as _sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+if getattr(_sys, "frozen", False):
+    # In PyInstaller builds, __file__ points inside the temporary _MEIPASS
+    # extraction directory. Keep mutable data next to the exe instead.
+    ROOT = Path(_sys.executable).resolve().parent
+else:
+    ROOT = Path(__file__).resolve().parents[1]
 CONFIG_DIR = ROOT / "config"
 DATA_DIR = ROOT / "data"
 CASES_DIR = DATA_DIR / "cases"
@@ -40,3 +46,6 @@ B_SERVICE_DOCX = DEFAULT_B_DIR / "保单服务委任函_曾冬灵.docx"
 
 for directory in (CONFIG_DIR, DATA_DIR, CASES_DIR, OUTPUT_DIR):
     directory.mkdir(parents=True, exist_ok=True)
+
+if not PROJECT_TR_REPRESENTATIVES.exists():
+    PROJECT_TR_REPRESENTATIVES.write_text("name,ia_no\n", encoding="utf-8")

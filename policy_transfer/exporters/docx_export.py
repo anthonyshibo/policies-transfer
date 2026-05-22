@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import date
 from pathlib import Path
 
 from docx import Document
@@ -11,7 +10,6 @@ from policy_transfer.models import PolicyCase
 
 def export_service_appointment(template: Path, output: Path, case: PolicyCase) -> None:
     doc = Document(str(template))
-    sign = _chinese_date(case.sign_date.value) if case.sign_date.value else _chinese_date(date.today().isoformat())
     proposer_cn = case.proposer.chinese_name.value or case.proposer.english_given_name.value
     proposer_en = _english_name(case)
     proposer_id = case.proposer.id_number.value
@@ -22,7 +20,7 @@ def export_service_appointment(template: Path, output: Path, case: PolicyCase) -
     for paragraph in doc.paragraphs:
         text = paragraph.text
         if text.startswith("日期："):
-            paragraph.text = f"日期：{sign}"
+            paragraph.text = "日期："
         elif "本人" in text and "身份证号码" in text:
             paragraph.text = (
                 f"本人____{proposer_cn}______, 身份证号码_{proposer_id}___，謹此函確認，"
@@ -42,10 +40,3 @@ def export_service_appointment(template: Path, output: Path, case: PolicyCase) -
 
 def _english_name(case: PolicyCase) -> str:
     return " ".join(part for part in [case.proposer.english_family_name.value, case.proposer.english_given_name.value] if part).strip()
-
-
-def _chinese_date(value: str) -> str:
-    parts = value.split("-")
-    if len(parts) == 3:
-        return f"{parts[0]}年{int(parts[1])}月{int(parts[2])}日"
-    return value

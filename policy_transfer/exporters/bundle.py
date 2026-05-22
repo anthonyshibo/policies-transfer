@@ -68,8 +68,8 @@ def _ack_values(case: PolicyCase) -> dict[str, object]:
         "Name of Client": _english_name(case),
         "Name of Introducer": "",
         "ID/ Passport No": case.proposer.id_number.value,
-        "Date": _display_date(case.sign_date.value),
-        "Video Date": _display_date(case.virtual_meeting_date.value or case.sign_date.value),
+        "Date": "",
+        "Video Date": "",
         "Name and Licensed No": _tr_name_license(case),
     }
 
@@ -112,7 +112,7 @@ def _client_booklet_values(case: PolicyCase) -> dict[str, object]:
         "Payment Term": case.products[0].premium_term.value if case.products else "",
         "Dropdown_fna1": products,
         "Dropdown_fna1-1": case.products[0].premium_term.value if case.products else "",
-        "Appointment Date": _display_date(case.sign_date.value),
+        "Appointment Date": "",
         "Name & License": _tr_name_license(case),
         "Client": _english_name(case),
         "Insured": " ".join(part for part in [insured.english_family_name.value, insured.english_given_name.value] if part),

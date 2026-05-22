@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from copy import deepcopy
 from dataclasses import dataclass
 from io import BytesIO
 
@@ -88,6 +89,9 @@ class PrudentialExtractor:
         case.billing_no = self._regex_value(pages, r"Billing No\.繳費編號\s+(BN\d+)")
         case.policy_no = case.proposal_no
         case.relationship = self._regex_value(pages, r"Relationship of Proposer with Life Proposed\s*投保人與受保人之關係\s*([^\n]+)")
+        insured_same_as_proposer = self._insured_same_as_proposer(pages)
+        if insured_same_as_proposer and not case.relationship.value:
+            case.relationship = fv("SELF", 0.95, insured_same_as_proposer, insured_same_as_proposer.text)
         case.currency = self._regex_value(pages, r"Currency保單貨幣\s+(.+?)(?:\n| Basic Plan)", transform=self._currency_code, required=True)
         case.payment_mode = self._regex_value(pages, r"Payment Mode繳費方式\s+(.+?)(?:\n| Payment Method)", transform=self._payment_mode, required=True)
         case.payment_method = self._regex_value(pages, r"Payment Method繳費方法\s+(.+?)(?:\n| \*)")
@@ -96,13 +100,26 @@ class PrudentialExtractor:
         case.next_premium_date = fv("", 0.0, None, "", False, "Not found in source PDFs; please confirm if required.")
 
         case.insured = self._extract_person(pages, "Life Proposed Personal Details", "insured")
-        case.proposer = self._extract_person(pages, "Proposer Personal Details", "proposer")
+        if insured_same_as_proposer:
+            case.proposer = self._extract_first_person(
+                pages,
+                [
+                    "Life Proposed & Proposer Personal Details",
+                    "Life Proposed and Proposer Personal Details",
+                    "Proposer Personal Details",
+                ],
+                "proposer",
+            )
+        else:
+            case.proposer = self._extract_person(pages, "Proposer Personal Details", "proposer")
         case.sign_date = self._extract_sign_date(pages, case)
         case.submission_date = case.sign_date
         case.commission_date = case.sign_date
-        case.virtual_meeting_date = fv(case.sign_date.value, 0.55, case.sign_date.source and PageText(case.sign_date.source.document, case.sign_date.source.page or 0, ""), "", False, "Virtual meeting date is not explicit in source PDFs; defaulted to sign date for review.")
+        case.virtual_meeting_date = fv("", 0.0, None, "", False, "Transfer meeting date is intentionally left blank for TR completion.")
         case.policy_date = fv(case.sign_date.value, 0.55, case.sign_date.source and PageText(case.sign_date.source.document, case.sign_date.source.page or 0, ""), "", True, "Policy date not found in PDFs; defaulted to sign date for review.")
         self._add_contact_and_identity(pages, case)
+        if insured_same_as_proposer and not self._has_person_identity(case.insured):
+            self._copy_proposer_to_insured(case)
         case.products = self._extract_products(pages, case)
         case.financial = self._extract_financial(pages)
         self._apply_epolicy_policy_content(case, pages)
@@ -124,6 +141,31 @@ class PrudentialExtractor:
 
     def _first_page(self, pages: list[PageText]) -> PageText | None:
         return pages[0] if pages else None
+
+    def _insured_same_as_proposer(self, pages: list[PageText]) -> PageText | None:
+        patterns = [
+            r"Is the Proposer the same as Life Proposed\?\s*投保人是否受保人\?\s*(?:Yes|是)",
+            r"(?:投保人是否(?:為|是)?受保人|受保人是否.*?投保人|Proposer.*?(?:same|also).*?(?:Life Proposed|Insured)).{0,80}(?:Yes|是)",
+            r"(?:Life Proposed|Insured).*?(?:same as|same).*?(?:Proposer|Policyowner).{0,80}(?:Yes|是)",
+        ]
+        for page in pages:
+            text = compact(page.text)
+            if any(re.search(pattern, text, re.I) for pattern in patterns):
+                return page
+        return None
+
+    def _has_person_identity(self, person: Person) -> bool:
+        return any(
+            str(getattr(person, field).value or "").strip()
+            for field in ("english_family_name", "english_given_name", "chinese_name", "date_of_birth", "id_number")
+        )
+
+    def _copy_proposer_to_insured(self, case: PolicyCase) -> None:
+        case.insured.role = "insured"
+        for field in case.insured.__dataclass_fields__:
+            if field == "role":
+                continue
+            setattr(case.insured, field, deepcopy(getattr(case.proposer, field)))
 
     def _first_company_page(self, pages: list[PageText]) -> PageText | None:
         for page in pages:
@@ -178,6 +220,13 @@ class PrudentialExtractor:
         person.english_given_name = fv("", 0.0, None, "", True)
         return person
 
+    def _extract_first_person(self, pages: list[PageText], headings: list[str], role: str) -> Person:
+        for heading in headings:
+            person = self._extract_person(pages, heading, role)
+            if self._has_person_identity(person):
+                return person
+        return Person(role=role, english_family_name=fv("", 0.0, None, "", True), english_given_name=fv("", 0.0, None, "", True))
+
     def _add_contact_and_identity(self, pages: list[PageText], case: PolicyCase) -> None:
         all_text = "\n".join(page.text for page in pages)
         # Insured identity appears before proposer identity in the sample.
@@ -193,7 +242,14 @@ class PrudentialExtractor:
             case.proposer.id_number = fv(compact(proposer_id.group(1)), 0.98, page, proposer_id.group(0), True)
             case.proposer.travel_permit_number = fv(compact(proposer_id.group(2)), 0.95, page, proposer_id.group(0))
 
-        proposer_segment = self._section_after(all_text, "Proposer Personal Details投保人個人資料")
+        proposer_segment = self._section_after_any(
+            all_text,
+            [
+                "Proposer Personal Details投保人個人資料",
+                "Life Proposed & Proposer Personal Details受保人及投保人個人資料",
+                "Life Proposed and Proposer Personal Details受保人及投保人個人資料",
+            ],
+        )
         occupation = re.search(
             r"Occupation Details職業詳情\s+Name of Employer僱主名稱\s+(.+?)\s+Business Nature業務性質\s+(.+?)\s+Occupation & Duties職業及工作性質\s+(.+?)\s+Business Address公司地址\s+(.+?)\s+Address and Contact Information",
             proposer_segment,
@@ -236,6 +292,11 @@ class PrudentialExtractor:
     def _section_after(self, text: str, marker: str) -> str:
         index = text.find(marker)
         return text[index:] if index >= 0 else text
+
+    def _section_after_any(self, text: str, markers: list[str]) -> str:
+        indexes = [text.find(marker) for marker in markers]
+        indexes = [index for index in indexes if index >= 0]
+        return text[min(indexes) :] if indexes else text
 
     def _occupation_title(self, value: str) -> str:
         text = compact(value)

@@ -187,6 +187,8 @@ def _relationship_code(value: object) -> str:
         return "GRANDPARENT"
     if "Parent" in text or "父母" in text:
         return "PARENT"
+    if "SELF" in text or "Same" in text or "本人" in text or "自己" in text:
+        return "OWN"
     if "Own" in text or "本人" in text:
         return "OWN"
     return text

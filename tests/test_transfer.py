@@ -5,10 +5,12 @@ from pathlib import Path
 
 from openpyxl import load_workbook
 from pypdf import PdfReader
+from docx import Document
 
 from policy_transfer.exporters import export_bundle
 from policy_transfer.exporters.excel_export import _tr_account
 from policy_transfer.extractors import ExtractionInput, PrudentialExtractor
+from policy_transfer.extractors.prudential import PageText
 from policy_transfer.models import FieldValue, Person, PolicyCase, ProductLine
 from policy_transfer.server import _apply_tr_override
 
@@ -33,6 +35,7 @@ def main() -> None:
     test_no_tr_account_fallback()
     test_tr_manual_override()
     test_tr_override_empty_keeps_document_value()
+    test_same_insured_copies_proposer()
     test_future_extractor_shape()
     print("All tests passed.")
 
@@ -85,6 +88,9 @@ def test_export_bundle() -> None:
             assert path.exists(), path
             assert path.stat().st_size > 0, path
         PdfReader(str(files["client_acknowledgement"]))
+        ack_fields = PdfReader(str(files["client_acknowledgement"])).get_fields() or {}
+        assert ack_fields["Date"].get("/V") in ("", None)
+        assert ack_fields["Video Date"].get("/V") in ("", None)
         PdfReader(str(files["risk_assessment"]))
         booklet_fields = PdfReader(str(files["client_booklet"])).get_fields() or {}
         assert booklet_fields["Dropdown_fn2"].get("/V") in ("", None)
@@ -113,6 +119,8 @@ def test_export_bundle() -> None:
         wb = load_workbook(files["policy_import"], data_only=True)
         assert "policy" in wb.sheetnames
         assert wb["policy"]["C2"].value == "000014260829"
+        appointment = Document(str(files["service_appointment"]))
+        assert any(paragraph.text == "日期：" for paragraph in appointment.paragraphs)
 
 
 def test_no_tr_account_fallback() -> None:
@@ -156,6 +164,58 @@ def test_tr_override_empty_keeps_document_value() -> None:
     _apply_tr_override(case, _FakeForm({"tr_mode": "manual"}))
     assert case.tr_name.value == "DOCUMENT TR"
     assert case.tr_license_no.value == "DOC123"
+
+
+def test_same_insured_copies_proposer() -> None:
+    extractor = PrudentialExtractor()
+    case = PolicyCase()
+    case.proposer = Person(
+        role="proposer",
+        english_family_name=FieldValue("CHAN", 1),
+        english_given_name=FieldValue("TAI MAN", 1),
+        chinese_name=FieldValue("陳大文", 1),
+        date_of_birth=FieldValue("1980-01-01", 1),
+        sex=FieldValue("MALE", 1),
+        nationality=FieldValue("China", 1),
+        id_number=FieldValue("A1234567", 1),
+        residential_address=FieldValue("Hong Kong", 1),
+    )
+    same_page = PageText("same.pdf", 1, "投保人是否受保人 是")
+    assert extractor._insured_same_as_proposer([same_page]) is same_page
+    assert not extractor._has_person_identity(case.insured)
+    extractor._copy_proposer_to_insured(case)
+    assert case.insured.english_family_name.value == "CHAN"
+    assert case.insured.id_number.value == "A1234567"
+    assert case.insured.role == "insured"
+
+    combined_page = PageText(
+        "same.pdf",
+        1,
+        """
+        Is the Proposer the same as Life Proposed?
+        投保人是否受保人?
+        Yes 是
+        Life Proposed & Proposer Personal Details受保人及投保人個人資料
+        Family Name姓 ZHAO
+        Given Name名 JUAN
+        Name in Chinese中文姓名 趙娟
+        Date of Birth出生日期 (Day 日/Month 月/Year 年) 20/05/1988
+        Age Next Birthday下次生日年齡 37
+        Sex性別 Female 女
+        Marital Status婚姻狀況 Married 已婚
+        Passport / ID Document護照 / 身份證明文件 HKSAR, China 中國 香港特別行政區
+        Place of Birth出生地 China 中國
+        """,
+    )
+    assert extractor._insured_same_as_proposer([combined_page]) is combined_page
+    person = extractor._extract_first_person(
+        [combined_page],
+        ["Life Proposed & Proposer Personal Details", "Proposer Personal Details"],
+        "proposer",
+    )
+    assert person.english_family_name.value == "ZHAO"
+    assert person.english_given_name.value == "JUAN"
+    assert person.chinese_name.value == "趙娟"
 
 
 def test_future_extractor_shape() -> None:

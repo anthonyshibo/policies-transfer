@@ -150,15 +150,6 @@ class PolicyCase:
                 continue
             if key in data:
                 setattr(case, key, fv(data[key]))
-        if not case.virtual_meeting_date.value and case.sign_date.value:
-            case.virtual_meeting_date = FieldValue(
-                case.sign_date.value,
-                0.55,
-                case.sign_date.source,
-                False,
-                True,
-                "Virtual meeting date is not explicit in source PDFs; defaulted to sign date for review.",
-            )
         case.proposer = person(data.get("proposer", {}), "proposer")
         case.insured = person(data.get("insured", {}), "insured")
         case.products = [product(p) for p in data.get("products", [])]

@@ -4,10 +4,18 @@ import os
 import sys as _sys
 from pathlib import Path
 
+def _frozen_root() -> Path:
+    executable = Path(_sys.executable).resolve()
+    for parent in executable.parents:
+        if parent.suffix == ".app":
+            return parent.parent
+    return executable.parent
+
+
 if getattr(_sys, "frozen", False):
     # In PyInstaller builds, __file__ points inside the temporary _MEIPASS
-    # extraction directory. Keep mutable data next to the exe instead.
-    ROOT = Path(_sys.executable).resolve().parent
+    # extraction directory. Keep mutable data next to the distributed app/exe.
+    ROOT = _frozen_root()
 else:
     ROOT = Path(__file__).resolve().parents[1]
 CONFIG_DIR = ROOT / "config"

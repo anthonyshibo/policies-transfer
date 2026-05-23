@@ -1,0 +1,13 @@
+PolicyTransferTool Mac 使用说明
+
+1. 双击 PolicyTransferTool.app，浏览器会自动打开本地网页。
+2. 完成工作后，在网页右上角点击“关闭本地服务”，然后关闭浏览器页面。
+3. TR 候选人名单保存在：
+   config/tr_representatives.csv
+   在上传页手工输入的新业务代表，也会自动加入此名单。
+4. 生成文件会写到：
+   data/outputs/
+5. 如果 macOS 提示无法打开未认证开发者 App：
+   右键点击 PolicyTransferTool.app，选择“打开”，再确认一次。
+
+注意：请把整个 PolicyTransferTool-Mac 文件夹一起复制给别人，不要只复制 .app。

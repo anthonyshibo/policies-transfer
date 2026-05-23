@@ -12,7 +12,7 @@ from policy_transfer.exporters.excel_export import _tr_account
 from policy_transfer.extractors import ExtractionInput, PrudentialExtractor
 from policy_transfer.extractors.prudential import PageText
 from policy_transfer.models import FieldValue, Person, PolicyCase, ProductLine
-from policy_transfer.server import _apply_tr_override
+from policy_transfer.server import _apply_tr_override, _read_tr_representatives, _store_tr_representative
 
 
 import os
@@ -24,6 +24,7 @@ EPOLICY_FILE = ROOT / "A" / "ePolicy_ZENG DONGLING_14260829 (ZENG01896130).PDF"
 
 
 def main() -> None:
+    test_tr_manual_saved_to_config()
     if not all(path.exists() for path in A_FILES):
         print("Sample A PDFs not found; set POLICY_TRANSFER_SAMPLE_ROOT to run sample-based tests.")
         test_future_extractor_shape()
@@ -164,6 +165,18 @@ def test_tr_override_empty_keeps_document_value() -> None:
     _apply_tr_override(case, _FakeForm({"tr_mode": "manual"}))
     assert case.tr_name.value == "DOCUMENT TR"
     assert case.tr_license_no.value == "DOC123"
+
+
+def test_tr_manual_saved_to_config() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        config_path = Path(tmp) / "tr_representatives.csv"
+        assert _store_tr_representative("NEW TR", "NEW456", config_path)
+        assert not _store_tr_representative("new tr", "new456", config_path)
+        assert _store_tr_representative("SECOND TR", "IA002", config_path)
+        assert _read_tr_representatives(config_path) == [
+            {"name": "NEW TR", "ia_no": "NEW456"},
+            {"name": "SECOND TR", "ia_no": "IA002"},
+        ]
 
 
 def test_same_insured_copies_proposer() -> None:

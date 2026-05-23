@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import os, sys, time, socket, threading, webbrowser, traceback, tkinter as tk
+import os, sys, time, socket, threading, webbrowser, traceback, shutil, tkinter as tk
 from tkinter import messagebox
 
 # ── 必须在最顶部，其他 import 之前 ──────────────────────────────────────────
@@ -28,7 +28,12 @@ def resource_path(rel: str) -> str:
 
 def exe_dir() -> str:
     if getattr(sys, "frozen", False):
-        return os.path.dirname(sys.executable)
+        exe_path = os.path.abspath(sys.executable)
+        parts = exe_path.split(os.sep)
+        for index, part in enumerate(parts):
+            if part.endswith(".app"):
+                return os.sep.join(parts[:index]) or os.sep
+        return os.path.dirname(exe_path)
     return os.path.dirname(os.path.abspath(__file__))
 
 
@@ -41,10 +46,23 @@ def setup_environment():
     os.environ.setdefault("POLICY_TRANSFER_HOST", HOST)
     os.environ.setdefault("POLICY_TRANSFER_PORT", str(PORT))
 
-    data_root = os.path.join(exe_dir(), "data")
+    root_dir = exe_dir()
+    config_dir = os.path.join(root_dir, "config")
+    os.makedirs(config_dir, exist_ok=True)
+    tr_config = os.path.join(config_dir, "tr_representatives.csv")
+    if not os.path.exists(tr_config):
+        bundled_tr_config = resource_path(os.path.join("config", "tr_representatives.csv"))
+        if os.path.exists(bundled_tr_config):
+            shutil.copy2(bundled_tr_config, tr_config)
+        else:
+            with open(tr_config, "w", encoding="utf-8") as f:
+                f.write("name,ia_no\n")
+    os.environ.setdefault("POLICY_TRANSFER_TR_REPRESENTATIVES", tr_config)
+
+    data_root = os.path.join(root_dir, "data")
     os.makedirs(os.path.join(data_root, "cases"),   exist_ok=True)
     os.makedirs(os.path.join(data_root, "outputs"), exist_ok=True)
-    os.chdir(exe_dir())
+    os.chdir(root_dir)
 
 
 def run_backend():

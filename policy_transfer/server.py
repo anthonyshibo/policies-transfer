@@ -9,12 +9,14 @@ import platform
 import re
 import subprocess
 import sys
+import threading
 import zipfile
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
+from policy_transfer import __version__
 from policy_transfer.case_store import create_case, load_case, output_dir, save_case, upload_dir
 from policy_transfer.config import DEFAULT_TRANSFER_DIR, TR_REPRESENTATIVES_FILE
 from policy_transfer.exporters import export_bundle
@@ -29,7 +31,7 @@ PORT = int(os.environ.get("POLICY_TRANSFER_PORT", "8787"))
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "PolicyTransfer/0.1"
+    server_version = f"PolicyTransfer/{__version__}"
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
@@ -59,6 +61,9 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if parsed.path == "/extract":
                 self._handle_extract()
+            elif parsed.path == "/shutdown":
+                self._html(_layout(_shutdown_page()))
+                threading.Timer(0.35, lambda: os._exit(0)).start()
             elif parsed.path.startswith("/review/"):
                 case_id = parsed.path.split("/")[-1]
                 length = int(self.headers.get("content-length", "0"))
@@ -95,7 +100,7 @@ class Handler(BaseHTTPRequestHandler):
             raise ValueError("请至少上传一份 PDF。")
         extractor = detect_extractor(files)
         case = extractor.extract(files)
-        _apply_tr_override(case, form)
+        _apply_tr_override(case, form, persist_manual=True)
         case_id = create_case(case)
         case_upload_dir = upload_dir(case_id)
         for item in files:
@@ -229,7 +234,7 @@ def _layout(content: str) -> str:
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Policy Transfer Tool</title>
+  <title>Policy Transfer Tool v{__version__}</title>
   <style>
     :root {{
       color-scheme: light;
@@ -244,8 +249,12 @@ def _layout(content: str) -> str:
     }}
     * {{ box-sizing: border-box; }}
     body {{ margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; background: var(--bg); color: var(--ink); }}
-    header {{ height: 64px; display: flex; align-items: center; justify-content: space-between; padding: 0 28px; background: #fff; border-bottom: 1px solid var(--line); }}
+    header {{ height: 64px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 28px; background: #fff; border-bottom: 1px solid var(--line); }}
+    .header-left {{ display: flex; align-items: baseline; gap: 10px; }}
     header a {{ color: var(--ink); text-decoration: none; font-weight: 700; }}
+    header form {{ margin: 0; }}
+    .shutdown-button {{ background: #f2f4f7; color: #344054; padding: 7px 10px; font-size: 12px; border: 1px solid var(--line); }}
+    .shutdown-button:hover {{ background: #fee4e2; color: #912018; }}
     main {{ max-width: 1180px; margin: 0 auto; padding: 28px; }}
     .panel {{ background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 24px; box-shadow: 0 12px 30px rgba(15, 23, 42, .05); }}
     h1 {{ margin: 0 0 10px; font-size: 28px; line-height: 1.2; }}
@@ -260,6 +269,7 @@ def _layout(content: str) -> str:
     .home-title {{ display: flex; align-items: center; gap: 14px; margin-bottom: 8px; }}
     .home-mark {{ width: 42px; height: 42px; display: grid; place-items: center; border-radius: 8px; background: #0f766e; color: #fff; font-weight: 900; font-size: 20px; box-shadow: 0 10px 24px rgba(15, 118, 110, .20); }}
     .home-title h1 {{ margin: 0; }}
+    .home-title small {{ font-size: 14px; font-weight: 650; color: var(--muted); }}
     .home-hero p {{ margin: 0; max-width: 760px; }}
     .home-content {{ padding: 24px 28px 28px; }}
     .home-actions {{ justify-content: flex-end; margin-top: 20px; }}
@@ -331,7 +341,10 @@ def _layout(content: str) -> str:
   </style>
 </head>
 <body>
-  <header><a href="/">Policy Transfer Tool</a><span>Prudential → B / C</span></header>
+  <header>
+    <div class="header-left"><a href="/">Policy Transfer Tool</a><span>v{__version__} · Prudential → B / C</span></div>
+    <form method="post" action="/shutdown"><button class="shutdown-button" type="submit">关闭本地服务</button></form>
+  </header>
   <main>{content}</main>
   <script>
     document.addEventListener('click', function (event) {{
@@ -378,12 +391,19 @@ def _layout(content: str) -> str:
 </html>"""
 
 
+def _shutdown_page() -> str:
+    return """<section class="panel">
+  <h1>本地服务已关闭</h1>
+  <p>保单转换工具已经退出。这个浏览器页面可以直接关闭；下次使用时重新双击 App 即可。</p>
+</section>"""
+
+
 def _home() -> str:
     tr_options = _tr_option_html()
     config_disabled = " disabled" if not tr_options else ""
     return f"""<section class="panel home-panel">
   <div class="home-hero">
-    <div class="home-title"><span class="home-mark">PT</span><h1>保单转单工具</h1></div>
+    <div class="home-title"><span class="home-mark">PT</span><h1>保单转单工具 <small>v{__version__}</small></h1></div>
     <p>上传 Prudential 保单文件与财务资料，系统会抽取关键字段；确认无误后，一次生成 B 公司文件和 C 系统导入表。</p>
   </div>
   <div class="home-content">
@@ -406,7 +426,7 @@ def _home() -> str:
       <div class="tr-mode">
         <label><input type="radio" name="tr_mode" value="document" checked> 从原始文档提取</label>
         <label><input type="radio" name="tr_mode" value="configured"{config_disabled}> 从配置名单选择</label>
-        <label><input type="radio" name="tr_mode" value="manual"> 手工输入</label>
+        <label><input type="radio" name="tr_mode" value="manual"> 手工输入并保存至名单</label>
       </div>
       <div class="tr-pane" data-tr-pane="configured" hidden>
         <div class="tr-fields">
@@ -423,6 +443,7 @@ def _home() -> str:
           <label>TR name / 业务代表姓名<input name="manual_tr_name" autocomplete="off"></label>
           <label>IA number / IA 号码<input name="manual_tr_license_no" autocomplete="off"></label>
         </div>
+        <p>录入后会自动加入配置名单，下次可直接选择；已有相同姓名及 IA 号码时不会重复加入。</p>
       </div>
     </div>
     <div class="actions home-actions"><button class="primary" type="submit">上传并抽取</button></div>
@@ -453,7 +474,37 @@ def _tr_option_html() -> str:
     return "".join(options)
 
 
-def _apply_tr_override(case, form: cgi.FieldStorage) -> None:
+def _store_tr_representative(name: str, ia_no: str, target: Path = TR_REPRESENTATIVES_FILE) -> bool:
+    if not name and not ia_no:
+        return False
+    existing = _load_tr_representatives() if target == TR_REPRESENTATIVES_FILE else _read_tr_representatives(target)
+    key = (name.casefold(), ia_no.casefold())
+    if any((row["name"].casefold(), row["ia_no"].casefold()) == key for row in existing):
+        return False
+    target.parent.mkdir(parents=True, exist_ok=True)
+    write_header = not target.exists() or target.stat().st_size == 0
+    with target.open("a", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=["name", "ia_no"])
+        if write_header:
+            writer.writeheader()
+        writer.writerow({"name": name, "ia_no": ia_no})
+    return True
+
+
+def _read_tr_representatives(target: Path) -> list[dict[str, str]]:
+    if not target.exists():
+        return []
+    with target.open("r", encoding="utf-8-sig", newline="") as handle:
+        rows = []
+        for row in csv.DictReader(handle):
+            name = (row.get("name") or "").strip()
+            ia_no = (row.get("ia_no") or row.get("license_no") or "").strip()
+            if name or ia_no:
+                rows.append({"name": name, "ia_no": ia_no})
+        return rows
+
+
+def _apply_tr_override(case, form: cgi.FieldStorage, persist_manual: bool = False) -> None:
     mode = (form.getfirst("tr_mode") or "document").strip()
     name = ""
     license_no = ""
@@ -467,6 +518,8 @@ def _apply_tr_override(case, form: cgi.FieldStorage) -> None:
     elif mode == "manual":
         name = (form.getfirst("manual_tr_name") or "").strip()
         license_no = (form.getfirst("manual_tr_license_no") or "").strip()
+        if persist_manual:
+            _store_tr_representative(name, license_no)
 
     if not name and not license_no:
         return
